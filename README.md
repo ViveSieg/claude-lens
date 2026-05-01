@@ -49,7 +49,7 @@ window — same conversation, two views.
 ## Install — one command
 
 ```bash
-npm install -g claude-lens
+npm install -g @vivesieg/claude-lens
 ```
 
 That's it. The package auto-runs its own setup so the slash commands work

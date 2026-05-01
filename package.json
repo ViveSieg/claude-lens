@@ -1,6 +1,9 @@
 {
-  "name": "claude-lens",
+  "name": "@vivesieg/claude-lens",
   "version": "0.3.0",
+  "publishConfig": {
+    "access": "public"
+  },
   "description": "Render Claude Code's terminal replies in a browser tab — markdown, KaTeX, Mermaid, syntax highlighting. Optional NotebookLM tutor wizard with role templates.",
   "bin": {
     "claude-lens": "bin/claude-lens-cli.js"

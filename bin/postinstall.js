@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /* claude-lens npm postinstall — runs install.sh quietly so the slash
-   commands work right after `npm i -g claude-lens`. Failure here MUST
+   commands work right after `npm i -g @vivesieg/claude-lens`. Failure here MUST
    never break the install — we just print a friendly hint.
 */
 

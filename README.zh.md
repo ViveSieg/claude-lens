@@ -44,7 +44,7 @@
 ## 安装：一行命令
 
 ```bash
-npm install -g claude-lens
+npm install -g @vivesieg/claude-lens
 ```
 
 完事。包会自己跑 setup，slash 命令立刻可用。**不需要再敲什么 `claude-lens setup`**。
