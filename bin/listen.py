@@ -1,19 +1,10 @@
 #!/usr/bin/env python3
-"""claude-lens listen — inject browser input into the front terminal.
+"""claude-lens listen — type browser input into the front terminal.
 
-Watches the named pipe at ``~/.claude-lens/input.pipe`` (created by the
-mirror server's ``POST /input`` endpoint). For each line it reads, sends
-keystrokes + Return to whatever window has OS focus:
-
-* macOS: ``osascript`` / System Events
-* Linux: ``xdotool``
-
-Run this in a *separate* terminal window after focusing your Claude Code
-terminal. Browser-side typing then reaches Claude with no manual paste.
-
-macOS note: System Events keystroke requires Accessibility permission for
-your terminal app (System Settings → Privacy & Security → Accessibility).
-Without it, keystrokes are silently dropped.
+Reads lines from ~/.claude-lens/input.pipe and sends keystrokes + Return
+to the OS-frontmost window via osascript (macOS) or xdotool (Linux).
+The mirror server spawns this on first WebSocket connect and tears it
+down after grace when the last browser tab closes.
 """
 
 from __future__ import annotations

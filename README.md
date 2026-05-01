@@ -6,7 +6,8 @@
 
 <p align="center">
   <i>See Claude clearly.</i><br>
-  Live-render Claude Code's terminal replies in a browser tab — markdown, LaTeX, Mermaid, syntax highlighting.
+  Claude Code's terminal replies, rendered live in your browser —
+  with real markdown, math, diagrams, and code highlighting.
 </p>
 
 <p align="center">
@@ -17,238 +18,168 @@
 </p>
 
 <p align="center">
-  <img alt="Python" src="https://img.shields.io/badge/python-3.10%2B-3776ab?style=for-the-badge&logo=python&logoColor=white&labelColor=141413">
-  <img alt="Node" src="https://img.shields.io/badge/node-18%2B-339933?style=for-the-badge&logo=nodedotjs&logoColor=white&labelColor=141413">
-  <img alt="macOS · Linux" src="https://img.shields.io/badge/platform-macOS%20%C2%B7%20Linux-faf9f5?style=for-the-badge&labelColor=141413">
-</p>
-
-<p align="center">
   <b>English</b> · <a href="README.zh.md">中文</a>
 </p>
 
 ---
 
-## The problem
+## What does it do?
 
-Claude Code is a **terminal app**. The terminal renders markdown, but it
-flattens everything that doesn't fit a monospace grid:
+The terminal squashes everything into monospace text. Math turns into
+garbled characters, tables get cut off, diagrams stay as source code.
+**claude-lens** mirrors every reply you get from Claude Code into a Chrome
+tab where it actually looks the way it was written.
 
-| What you wrote | What the terminal shows |
-|---|---|
-| `$\beta = i_C / i_B$` | `β = i_C / i_B` *(escaped, ugly, sometimes broken)* |
-| ```mermaid\nflowchart LR\n  A --> B``` | the source code, no diagram |
-| Wide tables, syntax-highlighted code, callouts, footnotes | best-effort, often clipped |
-
-Workarounds — copy the reply, paste into a markdown previewer, render it,
-swap context — break the loop you're in. **claude-lens** removes the
-swap: the same reply that lands in your terminal also appears in a Chrome
-tab, fully rendered, in real time.
+You keep typing in your terminal. The browser is a beautiful read-only
+window — same conversation, two views.
 
 ```
-┌─ terminal ─────────────────┐    ┌─ http://127.0.0.1:7456 ──────┐
-│ > /lens on                 │    │  Claude Lens                 │
-│ > help me with bessel ...  │ ──►│  ─────────────────────────── │
-│                            │    │  ## Bessel functions         │
-│ <reply streams here>       │    │  J_n(x) = …    (KaTeX)       │
-│                            │    │  ┌─────┬─────┐               │
-│                            │    │  │ tables render             │
-│                            │    │  └─────┴─────┘               │
-│                            │    │  ```python … ``` highlighted │
-└────────────────────────────┘    └──────────────────────────────┘
+┌─ terminal ─────────────────┐    ┌─ browser ─────────────────────┐
+│ > help me with bessel ...  │    │  ## Bessel functions          │
+│                            │ ──►│                               │
+│ <reply streams here>       │    │  J_n(x) = …  (rendered math)  │
+│                            │    │  ┌────────┐  (real tables)    │
+│                            │    │  │        │                   │
+│                            │    │  └────────┘                   │
+└────────────────────────────┘    └───────────────────────────────┘
 ```
 
-## What it gives you
+---
 
-| | |
-|---|---|
-| 🪞 **Mirror** | A Stop hook + local FastAPI + Chrome tab. Every assistant turn auto-renders within ~100 ms. |
-| 🎓 **Tutor** *(optional)* | Interactive wizard binding a project to a fixed NotebookLM knowledge base, with five pre-built role templates. |
-| 🔭 **Per-session feed** | Each Claude Code session gets its own URL and persistent JSONL history. Add ➕ / delete × / rename ✎ from the sidebar. |
-| ↩️ **Bidirectional input** | Browser input bar persists as a `user` message in the session AND writes to a named pipe a terminal wrapper can read. |
-| ✂️ **Copy buttons** | Per message: copy markdown source or copy plain text. |
-| 🗂️ **TOC sidebar** | Auto-generated from `##`/`###` headings. |
-| 🎨 **Editorial design** | Cream canvas + coral accents + serif headlines. |
-| 🛡️ **Fail-quiet** | If the server isn't running, the hook silently no-ops. **Never blocks the shell.** |
-
-## Quickstart
+## Install — one command
 
 ```bash
 npm install -g claude-lens
-claude-lens setup
-
-# in any Claude Code session:
-/lens on              # start mirror, register Stop hook, open Chrome
-/tutor init           # (optional) bind this project to a NotebookLM knowledge base
 ```
 
-From source:
+That's it. The package auto-runs its own setup so the slash commands work
+inside Claude Code immediately. No `claude-lens setup` needed.
 
-```bash
-git clone https://github.com/ViveSieg/claude-lens.git
-cd claude-lens
-./install.sh
-```
+You'll need: macOS or Linux, Python 3.10+, Node 18+, and Claude Code.
 
-## Mirror — the core layer
+---
 
-### Pipeline
+## Use it
 
-```
-Claude Code session
-        │
-        │  (assistant turn ends)
-        ▼
-   Stop hook ──► hooks/stop_lens.py
-        │
-        │  reads transcript_path, extracts last assistant message
-        ▼
-   POST /push ──► FastAPI (server/main.py)
-                   │
-                   ├─► append to ~/.claude-lens/sessions/<id>.jsonl
-                   └─► broadcast to all WebSocket clients
-                              │
-                              ▼
-                       Chrome tab renders
-                       (marked + KaTeX + Mermaid + highlight.js)
-```
-
-### Stop-hook payload
-
-```json
-{
-  "session_id":    "<claude code session id>",
-  "session_label": "<cwd basename>",
-  "role":          "assistant",
-  "content":       "<the markdown reply>"
-}
-```
-
-### CLI
+Inside any Claude Code session, type:
 
 ```
-/lens on        start server, register Stop hook, open browser
-/lens off       stop server, remove hook
-/lens open      re-open the browser tab
-/lens status    is the server running?
-/lens restart   bounce server
+/lens on
 ```
 
-The browser auto-opens in Chrome → Chromium → Brave → Edge → system default.
+This starts the local mirror server, opens a Chrome tab pointed at it,
+and registers a hook so every future reply auto-renders in the tab.
+Stop with `/lens off`.
 
-## Tutor — optional NotebookLM layer
+### What you can do in the browser tab
 
-`/tutor` scaffolds a project so Claude Code is **bound to a fixed
-NotebookLM notebook as a read-only knowledge base** — not a teacher, not
-a writeable store. Claude does all the teaching; NotebookLM only
-retrieves.
+- **Watch replies render live** — markdown, $\LaTeX$, Mermaid diagrams, syntax-highlighted code, tables.
+- **Switch between Claude conversations** — every `claude` session you start in any terminal shows up as its own feed in the sidebar.
+- **Type back to the terminal** — there's an input bar at the bottom. What you type appears in the feed AND gets typed into your active Claude Code terminal automatically.
+- **Paste images** — `Cmd+V` a screenshot directly into the input bar. It uploads, the path gets appended to your message, and Claude can read it.
+- **Rename or delete feeds** — click the title to rename, hover a feed to get a `×` delete button.
 
-### The Source Anchoring principle
+### The slash commands
 
-> **Every domain claim in Claude's output must trace to a `/notecraft chat`
-> citation.** Claude can repackage, structure, drill, quiz, analogize,
-> derive — but never invents domain facts. If the notebook doesn't say
-> it, Claude says "not covered" and stops.
+| Command | What it does |
+|---|---|
+| `/lens on` | Start mirror server, hook, browser. |
+| `/lens off` | Stop everything. |
+| `/lens open` | Re-open the browser tab. |
+| `/lens status` | Is the server running? |
+| `/lens restart` | Restart the server. |
 
-This is enforced by every role template. Mechanical operations (algebra,
-code execution, file I/O, formatting) don't need a citation. New domain
-claims do.
+---
 
-### The wizard
+## Optional: connect a NotebookLM notebook
 
-```
-/tutor init
-  ├─ ① doctor         node, npm, notebooklm-client, Google session, lens server
-  ├─ ② notebook       lists your notebooks, you pick one as the knowledge base
-  ├─ ③ role           pick from 5 templates (or write a custom one)
-  ├─ ④ scaffold       writes ./CLAUDE.md, ./AGENTS.md, ./.claude-lens.json
-  ├─ ⑤ start          starts the mirror server + opens Chrome
-  └─ ⑥ smoke test     runs one query so you see the full pipeline live
-```
+Got a notebook (course materials, papers, docs) you want Claude to pull
+facts from? Run `/tutor init` and walk through the wizard.
 
-Subcommands:
+It will:
 
-```
-/tutor init       full wizard
-/tutor notebook   swap the notebook in the current project
-/tutor role       swap the role in the current project
-/tutor doctor     health-check the current project
-/tutor ask "..."  one-shot query through the configured notebook+role
-```
+1. Check your tools are installed.
+2. List your NotebookLM notebooks — pick one as the **knowledge base**.
+3. Pick a **role** for Claude.
+4. Generate a `CLAUDE.md` that locks in the contract.
 
-### Roles bundled in v0.1
+### Roles you can pick
 
-| Role | When to pick | Output schema |
+| Role | Best for |
+|---|---|
+| **research-advisor** | A pile of papers — research workflow with citations. |
+| **exam-reviewer** | Course materials — exam prep, key points, common mistakes. |
+| **socratic** | Learn by being asked questions instead of told answers. |
+| **librarian** | Pure quote retrieval, no commentary. |
+| **general** | A flexible default for anything else. |
+
+### The contract that makes this useful
+
+Every role enforces one rule: **anything Claude says about your topic must
+come from the notebook**. Claude can rephrase, restructure, draw analogies,
+quiz you, write code — but it can't make up facts that aren't in the
+notebook. If something isn't covered, Claude has to say so.
+
+You can trust the answers in a way you can't with vanilla chat. The
+notebook is your source of truth; Claude is the smart explainer on top.
+
+---
+
+## How it works (one paragraph)
+
+When Claude finishes a reply in your terminal, a hook reads the message and
+sends it to a small local server. The server stores it and pushes it to your
+browser tab over WebSocket, where it gets rendered. When you type in the
+browser, the reverse happens — your message gets typed into the active
+terminal so Claude sees it. If the server isn't running, the hook quietly
+does nothing — your terminal is never blocked.
+
+---
+
+## Configuration (you probably don't need this)
+
+| Variable | Default | What it controls |
 |---|---|---|
-| `research-advisor` | Paper pile / literature corpus | Sources / What I did / Conclusion / Not covered |
-| `exam-reviewer` | Course materials (lecture notes, textbook chapters, problem sets) | Sources / How I'd explain / Exam topics / Approach / Common mistakes / Conclusion / Not covered |
-| `socratic` | Inquiry-driven learning — agent asks instead of answers, uses notebook as fact-check | I ask you / Check (sources) / Not covered |
-| `librarian` | Strict retrieval, no commentary, original quotes only | Sources / Source table / Not covered |
-| `general` | Catch-all when none of the above quite fits | Sources / My processing / Conclusion / Not covered |
+| `CLAUDE_LENS_HOST` | `127.0.0.1` | Bind address. |
+| `CLAUDE_LENS_PORT` | `7456` | Port. |
+| `CLAUDE_LENS_DATA` | `~/.claude-lens` | Where session files live. |
+| `CLAUDE_LENS_LISTEN_GRACE` | `30` | Seconds to wait after browser closes before stopping the typing-listener. |
 
-> The bundled role templates render their output sections in Chinese
-> (`资料显示`, `我做了什么`, etc.) by default. Translate the files in
-> `roles/` if you want fully English output.
-
-## Configuration
-
-| Variable | Default | Meaning |
-|---|---|---|
-| `CLAUDE_LENS_HOST` | `127.0.0.1` | bind host |
-| `CLAUDE_LENS_PORT` | `7456` | port |
-| `CLAUDE_LENS_DATA` | `~/.claude-lens` | session JSONL + pid file |
-| `CLAUDE_LENS_ENDPOINT` | `http://127.0.0.1:7456/push` | where the Stop hook POSTs |
-| `CLAUDE_LENS_TIMEOUT` | `1.5` | Stop-hook HTTP timeout (s) |
-
-To run a second instance side-by-side (e.g. for two users on a shared
-machine), give it a different `CLAUDE_LENS_PORT` and `CLAUDE_LENS_DATA`.
-
-## Bidirectional input
-
-The browser tab has an input bar at the bottom. Submitting does two things:
-
-1. **Persists a `user` message in the current session** — `curl
-   http://127.0.0.1:7456/session/<id>` returns it; full history is preserved.
-2. **Writes to a named pipe at `~/.claude-lens/input.pipe`** — any terminal
-   wrapper can `cat` it.
-
-claude-lens does not auto-inject into Claude Code's prompt — wire that
-into a custom shell loop yourself.
+---
 
 ## Troubleshooting
 
-**The browser tab is empty / "disconnected — retrying…"**
-Check `claude-lens status`. If not running, `claude-lens start`. If port
-7456 is taken, set `CLAUDE_LENS_PORT` to something free and re-run
-`/lens on`.
+**Browser shows "disconnected — retrying…"**
+The mirror server isn't running. Run `/lens on` again, or `claude-lens start`.
 
-**`/tutor init` says `notebooklm-client: MISSING`**
-`npm i -g notebooklm-client`. If you see `EACCES`, prefix with `sudo`.
-
-**`/tutor init` says session is missing**
-Run `npx notebooklm export-session` — it opens a browser, you sign into
-Google, the session is cached at `~/.notebooklm/session.json`. Re-run
-the wizard.
+**Browser typing doesn't reach my terminal**
+On macOS, the keystroke injector needs Accessibility permission. Open
+System Settings → Privacy & Security → Accessibility, and enable your
+terminal app (Terminal.app or iTerm.app). First run usually fails silently
+until permission is granted.
 
 **Replies stop appearing in the browser**
 The Stop hook may have been removed from `~/.claude/settings.json`. Run
-`/lens on` again — it merges the hook back in safely.
+`/lens on` to put it back.
 
-## Roadmap
+**`/tutor init` says NotebookLM tools are missing**
+`npm i -g notebooklm-client`, then `npx notebooklm export-session` to log
+in to Google. Re-run `/tutor init`.
 
-- [ ] Streaming partial-message rendering (today: full message at end of turn)
-- [ ] Optional public-tunnel mode (Cloudflare Tunnel / ngrok wrapper)
-- [ ] Per-role linting: warn when an output is missing a `[citation]` it should have
-- [ ] More roles: `case-analyst`, `translator`, `speech-coach`
-- [ ] Built-in `claude-lens listen` to consume the input pipe and forward to your shell loop
+---
+
+## What's planned
+
+- Streaming partial-message rendering.
+- A simple way to share the mirror over the network or via a public tunnel.
+- More role templates (translation, case analysis, speech coach).
 
 ## Contributing
 
-Issues and PRs welcome. Two principles to keep in mind if you touch core code:
+Issues and PRs welcome. Two non-negotiables:
 
-1. **The Stop hook must never block the shell.** Any path that talks to
-   the server must time out fast and silently no-op on failure.
-2. **The Source Anchoring contract is the spine of the tutor layer.** New
-   roles must enforce it; PRs that loosen it need to make a strong case.
+1. The Stop hook must never block your shell.
+2. The "facts come from the notebook" contract is the heart of the tutor layer. New roles must enforce it.
 
 ## Credits
 
@@ -267,7 +198,3 @@ Issues and PRs welcome. Two principles to keep in mind if you touch core code:
 ## License
 
 [MIT](LICENSE).
-
-<p align="center">
-  <img src="https://capsule-render.vercel.app/api?type=waving&color=0:cc785c,100:e8a55a&height=120&section=footer" alt="" />
-</p>

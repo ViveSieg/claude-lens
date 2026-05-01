@@ -1,10 +1,10 @@
 """claude-lens server.
 
-Receives assistant replies from Stop hook (POST /push), stores them per
-session, and pushes to connected browser clients via WebSocket.
-
-Optionally accepts user input from browser (POST /input) and writes to a
-named pipe so the terminal can read it back.
+POST /push          assistant reply from Stop hook → store + broadcast.
+POST /input         browser → user message + named pipe.
+POST /upload-image  pasted screenshot → disk; returns path.
+GET/POST /session*  session CRUD.
+WebSocket /ws/{id}  per-session live feed; spawns/teardowns listener.
 """
 
 from __future__ import annotations
@@ -12,16 +12,14 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import secrets
+import subprocess
 import time
 from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
-import base64
-import secrets
-import time as _t
-
-from fastapi import FastAPI, UploadFile, File, Form, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, File, Form, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -56,11 +54,6 @@ class InputPayload(BaseModel):
     session_label: str | None = None
 
 
-# ---------------------------------------------------------------------------
-# WebSocket fan-out
-# ---------------------------------------------------------------------------
-
-
 class Hub:
     def __init__(self) -> None:
         self.clients: dict[str, set[WebSocket]] = defaultdict(set)
@@ -88,22 +81,11 @@ class Hub:
 
     async def total_clients(self) -> int:
         async with self.lock:
-            # Don't count the index/meta channel.
-            return sum(
-                len(s) for k, s in self.clients.items() if k != "__index__"
-            )
+            return sum(len(s) for k, s in self.clients.items() if k != "__index__")
 
 
 hub = Hub()
 
-
-# ---------------------------------------------------------------------------
-# Listener subprocess lifecycle (auto-spawn on first WS connect, auto-kill
-# after grace period when no clients remain).
-# ---------------------------------------------------------------------------
-
-
-import subprocess
 
 LISTENER_SCRIPT = ROOT.parent / "bin" / "listen.py"
 LISTENER_LOG = DATA_DIR / "listen.log"
@@ -168,11 +150,6 @@ class ListenerManager:
 listener = ListenerManager()
 
 
-# ---------------------------------------------------------------------------
-# Persistence helpers
-# ---------------------------------------------------------------------------
-
-
 def session_file(session_id: str) -> Path:
     safe = "".join(c for c in session_id if c.isalnum() or c in "-_") or "default"
     return SESSION_DIR / f"{safe}.jsonl"
@@ -225,11 +202,6 @@ def list_sessions() -> list[dict[str, Any]]:
     return out
 
 
-# ---------------------------------------------------------------------------
-# HTTP routes
-# ---------------------------------------------------------------------------
-
-
 @app.post("/push")
 async def push(payload: PushPayload) -> dict[str, Any]:
     msg = {
@@ -247,7 +219,6 @@ async def push(payload: PushPayload) -> dict[str, Any]:
 
 @app.post("/input")
 async def push_input(payload: InputPayload) -> dict[str, Any]:
-    # 1. Persist as a user message in the session and broadcast it.
     msg = {
         "session_id": payload.session_id,
         "session_label": payload.session_label,
@@ -259,25 +230,20 @@ async def push_input(payload: InputPayload) -> dict[str, Any]:
     await hub.broadcast(payload.session_id, {"type": "message", "message": msg})
     await hub.broadcast("__index__", {"type": "session_touch", "session": payload.session_id})
 
-    # 2. Best-effort write to the named pipe for any terminal consumer.
-    pipe_status: str | None = None
     if not PIPE_PATH.exists():
         try:
             os.mkfifo(PIPE_PATH)
         except FileExistsError:
             pass
         except OSError as e:
-            pipe_status = f"mkfifo failed: {e}"
-    if pipe_status is None:
-        try:
-            fd = os.open(PIPE_PATH, os.O_WRONLY | os.O_NONBLOCK)
-            os.write(fd, (payload.text + "\n").encode("utf-8"))
-            os.close(fd)
-            pipe_status = "delivered"
-        except OSError:
-            # Pipe has no reader — that's fine, the message is already persisted.
-            pipe_status = "no consumer"
-    return {"ok": True, "pipe": pipe_status}
+            return {"ok": True, "pipe": f"mkfifo failed: {e}"}
+    try:
+        fd = os.open(PIPE_PATH, os.O_WRONLY | os.O_NONBLOCK)
+        os.write(fd, (payload.text + "\n").encode("utf-8"))
+        os.close(fd)
+        return {"ok": True, "pipe": "delivered"}
+    except OSError:
+        return {"ok": True, "pipe": "no consumer"}
 
 
 @app.post("/session/{session_id}/label")
@@ -312,7 +278,7 @@ async def upload_image(
     if ext not in ALLOWED_IMAGE_EXT:
         ext = ".png"
     safe_session = "".join(c for c in session_id if c.isalnum() or c in "-_") or "default"
-    stamp = _t.strftime("%Y%m%d-%H%M%S")
+    stamp = time.strftime("%Y%m%d-%H%M%S")
     rand = secrets.token_hex(3)
     out = UPLOAD_DIR / f"{safe_session}-{stamp}-{rand}{ext}"
     data = await file.read()
@@ -338,17 +304,13 @@ async def get_upload(name: str) -> Any:
 
 @app.post("/session")
 async def create_session(payload: dict[str, Any]) -> dict[str, Any]:
-    """Create an empty session file so it shows up in the sidebar before any push."""
     session_id = str(payload.get("session_id") or "").strip()
     label = payload.get("session_label") or session_id
-    if not session_id:
-        return JSONResponse({"ok": False, "error": "session_id required"}, status_code=400)
     safe = "".join(c for c in session_id if c.isalnum() or c in "-_")
     if not safe:
         return JSONResponse({"ok": False, "error": "invalid session_id"}, status_code=400)
     path = session_file(safe)
     if not path.exists():
-        # Seed the file so list_sessions() picks it up; record the label too.
         seed = {
             "session_id": safe,
             "session_label": label,
@@ -379,16 +341,10 @@ async def delete_session(session_id: str) -> dict[str, Any]:
     return {"ok": True}
 
 
-# ---------------------------------------------------------------------------
-# WebSocket
-# ---------------------------------------------------------------------------
-
-
 @app.websocket("/ws/{session_id}")
 async def ws_endpoint(websocket: WebSocket, session_id: str) -> None:
     await websocket.accept()
     await hub.join(session_id, websocket)
-    # First real client → boot listener.
     if session_id != "__index__":
         await listener.ensure_running()
     try:
@@ -399,14 +355,8 @@ async def ws_endpoint(websocket: WebSocket, session_id: str) -> None:
         pass
     finally:
         await hub.leave(session_id, websocket)
-        # Last real client gone → schedule listener teardown after grace.
         if session_id != "__index__" and await hub.total_clients() == 0:
             await listener.schedule_stop()
-
-
-# ---------------------------------------------------------------------------
-# Static
-# ---------------------------------------------------------------------------
 
 
 app.mount("/static", StaticFiles(directory=str(STATIC)), name="static")
