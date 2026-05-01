@@ -20,6 +20,9 @@
   "engines": {
     "node": ">=18"
   },
+  "scripts": {
+    "postinstall": "node bin/postinstall.js"
+  },
   "os": ["darwin", "linux"],
   "keywords": [
     "claude",

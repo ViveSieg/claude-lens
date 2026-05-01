@@ -86,8 +86,86 @@ class Hub:
         for ws in dead:
             await self.leave(session_id, ws)
 
+    async def total_clients(self) -> int:
+        async with self.lock:
+            # Don't count the index/meta channel.
+            return sum(
+                len(s) for k, s in self.clients.items() if k != "__index__"
+            )
+
 
 hub = Hub()
+
+
+# ---------------------------------------------------------------------------
+# Listener subprocess lifecycle (auto-spawn on first WS connect, auto-kill
+# after grace period when no clients remain).
+# ---------------------------------------------------------------------------
+
+
+import subprocess
+
+LISTENER_SCRIPT = ROOT.parent / "bin" / "listen.py"
+LISTENER_LOG = DATA_DIR / "listen.log"
+LISTENER_GRACE_SEC = float(os.environ.get("CLAUDE_LENS_LISTEN_GRACE", "30"))
+
+
+class ListenerManager:
+    def __init__(self) -> None:
+        self.proc: subprocess.Popen | None = None
+        self.stop_task: asyncio.Task | None = None
+        self.lock = asyncio.Lock()
+
+    def _alive(self) -> bool:
+        return self.proc is not None and self.proc.poll() is None
+
+    async def ensure_running(self) -> None:
+        async with self.lock:
+            if self.stop_task and not self.stop_task.done():
+                self.stop_task.cancel()
+                self.stop_task = None
+            if self._alive():
+                return
+            if not LISTENER_SCRIPT.exists():
+                return
+            log = LISTENER_LOG.open("a", encoding="utf-8")
+            log.write(f"\n[server] spawning listener at {time.strftime('%H:%M:%S')}\n")
+            log.flush()
+            env = os.environ.copy()
+            env["CLAUDE_LENS_DATA"] = str(DATA_DIR)
+            self.proc = subprocess.Popen(
+                ["python3", str(LISTENER_SCRIPT)],
+                stdout=log,
+                stderr=log,
+                env=env,
+                start_new_session=True,
+            )
+
+    async def schedule_stop(self) -> None:
+        async with self.lock:
+            if not self._alive():
+                return
+            if self.stop_task and not self.stop_task.done():
+                return
+            self.stop_task = asyncio.create_task(self._delayed_stop())
+
+    async def _delayed_stop(self) -> None:
+        try:
+            await asyncio.sleep(LISTENER_GRACE_SEC)
+        except asyncio.CancelledError:
+            return
+        async with self.lock:
+            if self._alive():
+                try:
+                    self.proc.terminate()
+                except ProcessLookupError:
+                    pass
+                self.proc = None
+                with LISTENER_LOG.open("a", encoding="utf-8") as f:
+                    f.write(f"[server] listener stopped at {time.strftime('%H:%M:%S')}\n")
+
+
+listener = ListenerManager()
 
 
 # ---------------------------------------------------------------------------
@@ -310,6 +388,9 @@ async def delete_session(session_id: str) -> dict[str, Any]:
 async def ws_endpoint(websocket: WebSocket, session_id: str) -> None:
     await websocket.accept()
     await hub.join(session_id, websocket)
+    # First real client → boot listener.
+    if session_id != "__index__":
+        await listener.ensure_running()
     try:
         await websocket.send_json({"type": "ready", "session_id": session_id})
         while True:
@@ -318,6 +399,9 @@ async def ws_endpoint(websocket: WebSocket, session_id: str) -> None:
         pass
     finally:
         await hub.leave(session_id, websocket)
+        # Last real client gone → schedule listener teardown after grace.
+        if session_id != "__index__" and await hub.total_clients() == 0:
+            await listener.schedule_stop()
 
 
 # ---------------------------------------------------------------------------
