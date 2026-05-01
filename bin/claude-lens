@@ -104,7 +104,6 @@ cmd_open() {
   if [ "${opened}" -eq 0 ]; then
     echo "open ${url} in your browser"
   fi
-  spawn_listener_if_needed
 }
 
 cmd_listen() {

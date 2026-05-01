@@ -33,18 +33,104 @@ def _osascript_escape(text: str) -> str:
     return text.replace("\\", "\\\\").replace('"', '\\"')
 
 
+def _quartz_paste_to_pid(pid: int) -> bool:
+    """Post Cmd+V + Return to a specific pid without activating its app.
+
+    Returns True on success. Quartz CGEventPostToPid lets us deliver key
+    events to a target process even when it isn't the frontmost — so the
+    terminal pastes the clipboard in the background and the lens browser
+    keeps focus (no flash, no jump).
+    """
+    try:
+        from Quartz import (
+            CGEventCreateKeyboardEvent,
+            CGEventPostToPid,
+            CGEventSetFlags,
+            kCGEventFlagMaskCommand,
+        )
+    except ImportError:
+        return False
+    # macOS virtual keycodes: V=9, Return=36
+    for is_down in (True, False):
+        ev = CGEventCreateKeyboardEvent(None, 9, is_down)
+        CGEventSetFlags(ev, kCGEventFlagMaskCommand)
+        CGEventPostToPid(pid, ev)
+    for is_down in (True, False):
+        ev = CGEventCreateKeyboardEvent(None, 36, is_down)
+        CGEventPostToPid(pid, ev)
+    return True
+
+
+def _find_app_pid(name: str) -> int | None:
+    """Return the pid of a running app whose localized name matches `name`."""
+    try:
+        from AppKit import NSWorkspace
+    except ImportError:
+        return None
+    for app in NSWorkspace.sharedWorkspace().runningApplications():
+        try:
+            if app.localizedName() == name:
+                return int(app.processIdentifier())
+        except Exception:
+            continue
+    return None
+
+
 def inject_macos(text: str, *, focus_app: str | None) -> None:
-    esc = _osascript_escape(text)
-    activate = f'tell application "{focus_app}" to activate\n' if focus_app else ""
-    script = (
-        activate
-        + 'tell application "System Events"\n'
-        '    delay 0.05\n'
-        f'    keystroke "{esc}"\n'
-        '    delay 0.02\n'
-        '    key code 36\n'
-        'end tell\n'
-    )
+    """Inject text into focus_app (or current frontmost) via clipboard.
+
+    Strategy:
+    1. pbcopy the text (handles all Unicode incl. CJK; `keystroke` can't).
+    2. If focus_app is set and Quartz is available → CGEventPostToPid,
+       which delivers Cmd+V + Return to that pid in the background. No
+       app activation, no focus flash.
+    3. Fall back to osascript activate-paste-restore-prevApp if Quartz
+       isn't available (e.g. PyObjC missing) or the pid lookup fails.
+
+    Clipboard caveat: this clobbers the user's clipboard. We don't restore
+    it because macOS only round-trips text reliably — images/files through
+    AppleScript is lossy.
+    """
+    try:
+        subprocess.run(
+            ["pbcopy"], input=text.encode("utf-8"), check=True, timeout=2
+        )
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as e:
+        print(f"[listen] pbcopy failed: {e}", file=sys.stderr)
+        return
+
+    if focus_app:
+        pid = _find_app_pid(focus_app)
+        if pid and _quartz_paste_to_pid(pid):
+            return
+        # Fallback: activate, paste, restore. Visible flash but works.
+        script = (
+            'tell application "System Events"\n'
+            '    set prevApp to name of first application process whose frontmost is true\n'
+            'end tell\n'
+            f'tell application "{focus_app}" to activate\n'
+            'tell application "System Events"\n'
+            '    delay 0.08\n'
+            '    keystroke "v" using {command down}\n'
+            '    delay 0.05\n'
+            '    key code 36\n'
+            '    delay 0.05\n'
+            'end tell\n'
+            'try\n'
+            '    if prevApp is not "' + focus_app + '" then\n'
+            '        tell application prevApp to activate\n'
+            '    end if\n'
+            'end try\n'
+        )
+    else:
+        script = (
+            'tell application "System Events"\n'
+            '    delay 0.05\n'
+            '    keystroke "v" using {command down}\n'
+            '    delay 0.05\n'
+            '    key code 36\n'
+            'end tell\n'
+        )
     subprocess.run(["osascript", "-e", script], check=False)
 
 

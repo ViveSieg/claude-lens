@@ -65,7 +65,36 @@ def last_assistant_text(transcript: Path) -> str | None:
     return last_text
 
 
-def derive_session_label(cwd: str | None) -> str | None:
+def last_custom_title(transcript: Path) -> str | None:
+    """Return the most recent /rename title for this session, if any.
+
+    Claude Code writes one record per /rename:
+        {"type": "custom-title", "customTitle": "<name>", "sessionId": "..."}
+    """
+    if not transcript.exists():
+        return None
+    last_title: str | None = None
+    with transcript.open(encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rec = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if rec.get("type") == "custom-title":
+                t = rec.get("customTitle")
+                if t:
+                    last_title = t
+    return last_title
+
+
+def derive_session_label(transcript: Path | None, cwd: str | None) -> str | None:
+    if transcript is not None:
+        title = last_custom_title(transcript)
+        if title:
+            return title
     if not cwd:
         return None
     return Path(cwd).name or None
@@ -80,13 +109,14 @@ def main() -> int:
     if not transcript_path:
         return 0
 
-    text = last_assistant_text(Path(transcript_path))
+    transcript = Path(transcript_path)
+    text = last_assistant_text(transcript)
     if not text:
         return 0
 
     payload = {
         "session_id": str(session_id),
-        "session_label": derive_session_label(cwd),
+        "session_label": derive_session_label(transcript, cwd),
         "role": "assistant",
         "content": text,
     }

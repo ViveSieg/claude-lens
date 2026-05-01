@@ -20,6 +20,20 @@ fi
 "${VENV_DIR}/bin/pip" install -r "${REPO}/server/requirements.txt" >/dev/null
 echo ">>> python deps installed"
 
+# 1a. macOS only: verify Quartz/Cocoa are importable so the background-paste
+# path (Cmd+V via CGEventPostToPid, no focus steal) actually works at run
+# time. If this fails the listener still works, just visibly flashes the
+# terminal forward and back.
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  if "${VENV_DIR}/bin/python" -c "import Quartz, AppKit" >/dev/null 2>&1; then
+    echo ">>> macOS background-paste ready (PyObjC Quartz + AppKit)"
+  else
+    echo "    ! PyObjC import failed — listener will fall back to AppleScript"
+    echo "      (terminal will flash forward and back on each Send)."
+    echo "      Retry: ${VENV_DIR}/bin/pip install pyobjc-framework-Quartz pyobjc-framework-Cocoa"
+  fi
+fi
+
 # 2. directories
 mkdir -p "${COMMANDS_DIR}" "${PLUGINS_DIR}"
 

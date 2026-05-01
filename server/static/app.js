@@ -51,10 +51,21 @@ mermaid.initialize({
 function renderMarkdown(container, src) {
   // Pre-extract mermaid blocks so marked doesn't mangle them.
   const mermaidBlocks = [];
-  const protectedSrc = src.replace(/```mermaid\n([\s\S]*?)```/g, (_, code) => {
+  let protectedSrc = src.replace(/```mermaid\n([\s\S]*?)```/g, (_, code) => {
     const id = mermaidBlocks.length;
     mermaidBlocks.push(code.trim());
     return `<div class="mermaid-slot" data-mid="${id}"></div>`;
+  });
+
+  // Replace [image: /abs/path/.../<name>] tokens with a clickable
+  // thumbnail. Stored content keeps the full path so the listener still
+  // types it into the terminal — this is display-only.
+  let imgN = 0;
+  protectedSrc = protectedSrc.replace(/\[image:\s*([^\]]+)\]/g, (_, raw) => {
+    imgN++;
+    const path = raw.trim();
+    const filename = path.split("/").pop().replace(/[^A-Za-z0-9_.-]/g, "");
+    return ` <a href="/uploads/${filename}" target="_blank" rel="noopener" class="msg-img-link" title="${path}"><img src="/uploads/${filename}" alt="image${imgN}" class="msg-img" /></a> `;
   });
 
   container.innerHTML = marked.parse(protectedSrc);
@@ -114,20 +125,6 @@ async function loadSessions() {
 function renderSessionList(sessions) {
   els.sessionList.innerHTML = "";
 
-  // "+ New scratchpad" button always at top.
-  // Naming note: this creates a manual mirror bucket (for notes / render tests
-  // / demos). It does NOT start a new Claude Code conversation — those appear
-  // automatically when the Stop hook fires from any running `claude` process.
-  const addBtn = document.createElement("button");
-  addBtn.className = "session-add";
-  addBtn.textContent = "＋ New scratchpad";
-  addBtn.title =
-    "Create a manual mirror bucket for notes, demos, or render tests.\n" +
-    "Does NOT start a new Claude conversation — those auto-appear when " +
-    "you run `claude` in any terminal.";
-  addBtn.onclick = createSession;
-  els.sessionList.appendChild(addBtn);
-
   if (sessions.length === 0) {
     const empty = document.createElement("div");
     empty.className = "session-item";
@@ -168,37 +165,6 @@ function renderSessionList(sessions) {
     item.appendChild(del);
 
     els.sessionList.appendChild(item);
-  }
-}
-
-async function createSession() {
-  const name = prompt(
-    "Scratchpad name (letters, digits, dash, underscore).\n" +
-      "This creates a manual bucket for notes / render tests, " +
-      "NOT a new Claude conversation.",
-    ""
-  );
-  if (!name) return;
-  const safe = name.trim().replace(/[^A-Za-z0-9_-]/g, "-");
-  if (!safe) {
-    alert("Invalid scratchpad name.");
-    return;
-  }
-  try {
-    const r = await fetch("/session", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ session_id: safe, session_label: name.trim() }),
-    });
-    const data = await r.json();
-    if (!data.ok) {
-      alert("Could not create scratchpad: " + (data.error || "unknown error"));
-      return;
-    }
-    await loadSessions();
-    switchSession(data.session_id);
-  } catch (e) {
-    console.warn("createSession failed", e);
   }
 }
 
@@ -446,25 +412,39 @@ function rebuildToc() {
 // ---------- websocket ----------
 
 function connectWs() {
+  // tear down any prior ws so we never end up with two live sockets for the
+  // same session (which would broadcast each message twice into this tab).
+  if (ws) {
+    ws.onopen = null;
+    ws.onclose = null;
+    ws.onerror = null;
+    ws.onmessage = null;
+    try { ws.close(); } catch (_) {}
+  }
   const proto = location.protocol === "https:" ? "wss" : "ws";
   ws = new WebSocket(`${proto}://${location.host}/ws/${encodeURIComponent(currentSession)}`);
+  const myWs = ws;
 
-  ws.onopen = () => {
+  myWs.onopen = () => {
+    if (myWs !== ws) return;
     els.wsDot.className = "dot dot-ok";
     els.wsLabel.textContent = "connected";
   };
 
-  ws.onclose = () => {
+  myWs.onclose = () => {
+    if (myWs !== ws) return;  // a newer ws has taken over — let it drive retries
     els.wsDot.className = "dot dot-err";
     els.wsLabel.textContent = "disconnected — retrying…";
     setTimeout(connectWs, 1500);
   };
 
-  ws.onerror = () => {
+  myWs.onerror = () => {
+    if (myWs !== ws) return;
     els.wsDot.className = "dot dot-err";
   };
 
-  ws.onmessage = (evt) => {
+  myWs.onmessage = (evt) => {
+    if (myWs !== ws) return;  // ignore late frames from a superseded socket
     const data = JSON.parse(evt.data);
     if (data.type === "message") {
       if (data.message.role !== "system") appendMessage(data.message, true);
@@ -481,17 +461,28 @@ function connectWs() {
 }
 
 function reconnectWs() {
-  if (ws) {
-    try { ws.close(); } catch (_) {}
-  }
+  // connectWs handles teardown of any prior ws.
   connectWs();
 }
 
 // ---------- input ----------
 
-// Paste-to-upload: when the user pastes an image into the input field,
-// upload it and append its server-side path into the input box (so the
-// next Send carries the path, which Claude Code can Read directly).
+// Paste-to-upload: paste an image → upload → insert a short `[imageN]`
+// alias in the input box for legibility. On Send, aliases get expanded
+// back to `[image: /full/path]` so the listener (and Claude Code on the
+// terminal side) still gets the resolvable path.
+let pasteCounter = 0;
+const pasteAliases = new Map(); // alias text → full path
+
+function expandPasteAliases(text) {
+  for (const [alias, path] of pasteAliases.entries()) {
+    if (text.includes(alias)) {
+      text = text.split(alias).join(`[image: ${path}]`);
+    }
+  }
+  return text;
+}
+
 els.inputField.addEventListener("paste", async (e) => {
   const items = (e.clipboardData || {}).items || [];
   let imageItem = null;
@@ -514,9 +505,11 @@ els.inputField.addEventListener("paste", async (e) => {
     const r = await fetch("/upload-image", { method: "POST", body: fd });
     const data = await r.json();
     if (data.ok && data.path) {
-      const tag = `[image: ${data.path}]`;
+      pasteCounter++;
+      const alias = `[image${pasteCounter}]`;
+      pasteAliases.set(alias, data.path);
       const cur = els.inputField.value;
-      els.inputField.value = cur ? cur + " " + tag : tag;
+      els.inputField.value = cur ? cur + " " + alias : alias;
       els.inputField.placeholder = "Type a message back to the terminal…";
       els.inputField.focus();
     } else {
@@ -531,9 +524,12 @@ els.inputField.addEventListener("paste", async (e) => {
 
 els.inputForm.addEventListener("submit", async (e) => {
   e.preventDefault();
-  const text = els.inputField.value.trim();
-  if (!text) return;
+  const raw = els.inputField.value.trim();
+  if (!raw) return;
   els.inputField.value = "";
+  // Expand `[imageN]` aliases back to `[image: /full/path]` before sending
+  // so the listener types a path the terminal-side Claude can resolve.
+  const text = expandPasteAliases(raw);
   // Server now persists + broadcasts via WebSocket, so we don't echo locally
   // (otherwise the message would appear twice).
   try {

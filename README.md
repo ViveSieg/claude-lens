@@ -57,6 +57,48 @@ inside Claude Code immediately. No `claude-lens setup` needed.
 
 You'll need: macOS or Linux, Python 3.10+, Node 18+, and Claude Code.
 
+**What happens during install:** post-install creates a sandboxed Python venv
+inside the package directory and installs everything from `server/requirements.txt`
+into it (FastAPI/uvicorn, plus PyObjC `Quartz` + `Cocoa` on macOS for
+background paste). **Nothing touches your global Python.** Last line of the
+install output should say `>>> macOS background-paste ready (PyObjC Quartz + AppKit)`
+on macOS — if instead you see `PyObjC import failed`, the install hint
+shows the one-liner to retry.
+
+> **macOS one-time setup — required for "type back to terminal"**
+>
+> Browser → terminal typing posts synthetic keyboard events to your
+> terminal app. The default path uses **Quartz `CGEventPostToPid`** so
+> the paste happens in the background without stealing focus from the
+> browser tab. **Grant the permissions below before your first Send** —
+> otherwise the listener silently no-ops and you'll see your message in
+> the browser but nothing in the terminal.
+>
+> **1. Accessibility** (always required — must be added manually)
+> **System Settings → Privacy & Security → Accessibility** → click `+`,
+> add your **terminal app**: `Terminal.app`, `iTerm`, `Ghostty`,
+> `WezTerm`, `Alacritty` etc. — whichever one runs `claude` — and
+> **toggle the switch ON**. Adding without toggling does nothing.
+>
+> **2. Automation** (only matters if Quartz path falls back to AppleScript)
+> If `pyobjc-framework-Quartz` isn't installed (rare — it's a requirements
+> dep), the listener falls back to `osascript` which needs Automation
+> permission. macOS pops *"… wants to control 'System Events.app'."* on
+> first send — click **OK**. If you misclicked, fix it at **System
+> Settings → Privacy & Security → Automation** → expand your terminal app
+> → enable `System Events`.
+>
+> **3. Restart** that terminal app fully (Cmd+Q, reopen), then `/lens restart`.
+> macOS only re-reads permissions when the process starts.
+>
+> Sanity check: `~/.claude-lens/listen.log` should be quiet. If it shows
+> `not allowed assistive access` / `osascript 不允许发送按键 (1002)`,
+> Accessibility isn't on yet. If it shows `Not authorized to send Apple
+> events to System Events`, Automation isn't on yet.
+>
+> Receiving replies in the browser does **not** need either permission —
+> only the input-bar typing does.
+
 ---
 
 ## Use it
@@ -130,9 +172,28 @@ notebook is your source of truth; Claude is the smart explainer on top.
 When Claude finishes a reply in your terminal, a hook reads the message and
 sends it to a small local server. The server stores it and pushes it to your
 browser tab over WebSocket, where it gets rendered. When you type in the
-browser, the reverse happens — your message gets typed into the active
-terminal so Claude sees it. If the server isn't running, the hook quietly
-does nothing — your terminal is never blocked.
+browser, the reverse happens — the listener pastes your message via the
+clipboard into your terminal app. On macOS it does this in the **background**
+via Quartz (`CGEventPostToPid`) so the terminal never steals focus from your
+browser tab. If the server isn't running, the hook quietly does nothing —
+your terminal is never blocked.
+
+**Browser → terminal pipeline (macOS):**
+1. You type in the lens input bar; press Send.
+2. Server writes the text to a FIFO; listener reads it.
+3. Listener calls `pbcopy` (handles full Unicode incl. CJK reliably — keystroke injection drops/sticks on non-ASCII).
+4. Listener resolves the terminal app's pid via `NSWorkspace`, posts Cmd+V + Return to that pid via `CGEventPostToPid`. **No app activation, no focus flash.**
+5. The terminal app receives the keystrokes as if you pressed them — pastes the clipboard, hits Return.
+
+If PyObjC isn't installed (rare — it's a requirements.txt dep), the listener
+falls back to AppleScript activate-paste-restore, which works but visibly
+flashes the terminal forward and back.
+
+**Pasted images:** dropping/pasting an image into the lens input uploads it
+to `~/.claude-lens/uploads/<session>-<stamp>-<rand>.<ext>`. The input shows a
+short `[imageN]` alias; on Send it expands to `[image: /full/path]` so the
+terminal-side Claude can `Read` the file. The browser feed renders the
+token as a 280×220 thumbnail. Old uploads are auto-pruned (default 7 days).
 
 ---
 
@@ -144,6 +205,8 @@ does nothing — your terminal is never blocked.
 | `CLAUDE_LENS_PORT` | `7456` | Port. |
 | `CLAUDE_LENS_DATA` | `~/.claude-lens` | Where session files live. |
 | `CLAUDE_LENS_LISTEN_GRACE` | `30` | Seconds to wait after browser closes before stopping the typing-listener. |
+| `CLAUDE_LENS_FOCUS` | *(auto)* | macOS: name of the terminal app to paste into (e.g. `Ghostty`, `Terminal`, `iTerm`). Auto-detected from `$TERM_PROGRAM` when the server starts; set this to override. |
+| `CLAUDE_LENS_UPLOAD_TTL_DAYS` | `7` | macOS/Linux: delete pasted-image files older than N days at server startup. `0` disables cleanup. |
 
 ---
 
@@ -152,11 +215,13 @@ does nothing — your terminal is never blocked.
 **Browser shows "disconnected — retrying…"**
 The mirror server isn't running. Run `/lens on` again, or `claude-lens start`.
 
-**Browser typing doesn't reach my terminal**
-On macOS, the keystroke injector needs Accessibility permission. Open
-System Settings → Privacy & Security → Accessibility, and enable your
-terminal app (Terminal.app or iTerm.app). First run usually fails silently
-until permission is granted.
+**Browser typing doesn't reach my terminal (macOS)**
+The keystroke injector uses `osascript` and needs **Accessibility**
+permission for whichever terminal runs `claude`. See
+[macOS one-time setup](#install--one-command) above.
+You can confirm this is the cause by checking `~/.claude-lens/listen.log`
+for `not allowed assistive access` / `osascript 不允许发送按键 (1002)`.
+After granting, restart the terminal and run `/lens restart`.
 
 **Replies stop appearing in the browser**
 The Stop hook may have been removed from `~/.claude/settings.json`. Run

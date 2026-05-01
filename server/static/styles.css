@@ -48,7 +48,7 @@ html, body {
 
 .app {
   display: grid;
-  grid-template-columns: 280px 1fr;
+  grid-template-columns: 232px 1fr;
   height: 100vh;
   overflow: hidden;
 }
@@ -129,27 +129,6 @@ html, body {
   display: flex;
   flex-direction: column;
   gap: 4px;
-}
-
-.session-add {
-  font-family: var(--sans);
-  font-size: 13px;
-  font-weight: 500;
-  background: var(--canvas);
-  color: var(--primary);
-  border: 1px dashed var(--primary);
-  padding: 8px 12px;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: background 0.12s ease, color 0.12s ease, border-style 0.12s ease;
-  text-align: left;
-  margin-bottom: 6px;
-}
-
-.session-add:hover {
-  background: var(--primary);
-  color: var(--on-dark);
-  border-style: solid;
 }
 
 .session-item {
@@ -254,6 +233,32 @@ html, body {
 .toc a.toc-h3 {
   padding-left: 20px;
   color: var(--muted);
+}
+
+.msg-img-link {
+  display: inline-block;
+  vertical-align: middle;
+  margin: 4px 2px;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--hairline);
+  background: var(--surface-card);
+  transition: border-color 0.12s ease, transform 0.12s ease;
+  line-height: 0;
+}
+
+.msg-img-link:hover {
+  border-color: var(--primary);
+  transform: translateY(-1px);
+}
+
+.msg-img {
+  display: block;
+  max-width: 280px;
+  max-height: 220px;
+  width: auto;
+  height: auto;
+  object-fit: contain;
 }
 
 /* --- feed --- */

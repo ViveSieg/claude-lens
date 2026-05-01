@@ -1,3 +1,9 @@
 fastapi>=0.110
 uvicorn[standard]>=0.27
 python-multipart>=0.0.9
+# macOS-only: lets the listener post Cmd+V events to the terminal app's
+# pid via Quartz CGEventPostToPid, so paste happens in the background
+# without stealing focus from the lens browser tab. On Linux this wheel
+# isn't installed (sys_platform marker filters it out).
+pyobjc-framework-Quartz>=10.0; sys_platform == "darwin"
+pyobjc-framework-Cocoa>=10.0; sys_platform == "darwin"

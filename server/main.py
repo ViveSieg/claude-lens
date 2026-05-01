@@ -14,6 +14,7 @@ import json
 import os
 import secrets
 import subprocess
+import sys
 import time
 from collections import defaultdict
 from pathlib import Path
@@ -36,6 +37,62 @@ PIPE_PATH = DATA_DIR / "input.pipe"
 
 ALLOWED_IMAGE_EXT = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024  # 20 MB
+UPLOAD_TTL_DAYS = float(os.environ.get("CLAUDE_LENS_UPLOAD_TTL_DAYS", "7"))
+
+
+def _cleanup_uploads(ttl_days: float) -> None:
+    """Delete upload files older than `ttl_days`. 0 disables cleanup.
+
+    Pasted images would otherwise pile up indefinitely in DATA_DIR/uploads.
+    Old session jsonls may still reference them as `[image: /path]` — those
+    references just stop resolving (browser shows broken thumbnail), which
+    is acceptable since the user clearly opted into a TTL.
+    """
+    if ttl_days <= 0:
+        return
+    cutoff = time.time() - ttl_days * 86400
+    for p in UPLOAD_DIR.glob("*"):
+        try:
+            if p.is_file() and p.stat().st_mtime < cutoff:
+                p.unlink()
+        except OSError:
+            pass
+
+
+_cleanup_uploads(UPLOAD_TTL_DAYS)
+
+
+def _kill_orphan_listeners() -> None:
+    """Kill any leftover listen.py processes from a previous server run.
+
+    Listeners are spawned with start_new_session=True so they survive a
+    server crash — but that means a fresh server can find an old listener
+    still reading the FIFO and intercepting messages with stale code,
+    producing the "two listeners race for one FIFO" bug.
+    """
+    try:
+        result = subprocess.run(
+            ["pgrep", "-f", "claude-lens.*bin/listen.py"],
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return
+    for pid_str in result.stdout.split():
+        try:
+            pid = int(pid_str)
+        except ValueError:
+            continue
+        if pid == os.getpid():
+            continue
+        try:
+            os.kill(pid, 15)  # SIGTERM
+        except (OSError, ProcessLookupError):
+            pass
+
+
+_kill_orphan_listeners()
 
 app = FastAPI(title="claude-lens")
 
@@ -92,6 +149,34 @@ LISTENER_LOG = DATA_DIR / "listen.log"
 LISTENER_GRACE_SEC = float(os.environ.get("CLAUDE_LENS_LISTEN_GRACE", "30"))
 
 
+# TERM_PROGRAM is set by the terminal emulator on macOS. Map it to the .app
+# name AppleScript uses for `tell application "..." to activate`.
+_TERM_PROGRAM_TO_APP = {
+    "Apple_Terminal": "Terminal",
+    "iTerm.app": "iTerm",
+    "ghostty": "Ghostty",
+    "WezTerm": "WezTerm",
+    "Alacritty": "Alacritty",
+    "vscode": "Visual Studio Code",
+    "tabby": "Tabby",
+    "Hyper": "Hyper",
+    "warp": "Warp",
+    "kitty": "kitty",
+}
+
+
+def _detect_focus_app() -> str | None:
+    """Pick the terminal app to bring to front before pasting.
+
+    Override > auto-detect from TERM_PROGRAM. Empty string disables activation.
+    """
+    override = os.environ.get("CLAUDE_LENS_FOCUS")
+    if override is not None:
+        return override.strip() or None
+    tp = os.environ.get("TERM_PROGRAM", "")
+    return _TERM_PROGRAM_TO_APP.get(tp)
+
+
 class ListenerManager:
     def __init__(self) -> None:
         self.proc: subprocess.Popen | None = None
@@ -111,12 +196,21 @@ class ListenerManager:
             if not LISTENER_SCRIPT.exists():
                 return
             log = LISTENER_LOG.open("a", encoding="utf-8")
-            log.write(f"\n[server] spawning listener at {time.strftime('%H:%M:%S')}\n")
+            focus = _detect_focus_app()
+            log.write(
+                f"\n[server] spawning listener at {time.strftime('%H:%M:%S')}"
+                f" (focus={focus or 'none — current frontmost'})\n"
+            )
             log.flush()
             env = os.environ.copy()
             env["CLAUDE_LENS_DATA"] = str(DATA_DIR)
+            # Use the server's own python so the listener inherits the venv
+            # (incl. PyObjC/Quartz on macOS, which we use for background paste).
+            cmd = [sys.executable, str(LISTENER_SCRIPT)]
+            if focus:
+                cmd += ["--focus", focus]
             self.proc = subprocess.Popen(
-                ["python3", str(LISTENER_SCRIPT)],
+                cmd,
                 stdout=log,
                 stderr=log,
                 env=env,
@@ -153,6 +247,54 @@ listener = ListenerManager()
 def session_file(session_id: str) -> Path:
     safe = "".join(c for c in session_id if c.isalnum() or c in "-_") or "default"
     return SESSION_DIR / f"{safe}.jsonl"
+
+
+# Path where Claude Code stores its own per-session JSONL transcripts. We
+# read these (read-only) to recover the user's `/rename` custom title even
+# when our own session file has been cleared — so the lens sidebar/title
+# always reflects the conversation name without waiting for the next Stop
+# hook to push it down.
+CLAUDE_PROJECTS_DIR = Path.home() / ".claude" / "projects"
+
+
+def find_claude_transcript(session_id: str) -> Path | None:
+    if not session_id or session_id == "default":
+        return None
+    if not CLAUDE_PROJECTS_DIR.exists():
+        return None
+    matches = list(CLAUDE_PROJECTS_DIR.glob(f"*/{session_id}.jsonl"))
+    if not matches:
+        return None
+    return max(matches, key=lambda p: p.stat().st_mtime)
+
+
+def custom_title_from_transcript(session_id: str) -> str | None:
+    """Return the latest /rename customTitle for a Claude Code session.
+
+    Records look like:
+        {"type": "custom-title", "customTitle": "...", "sessionId": "..."}
+    """
+    transcript = find_claude_transcript(session_id)
+    if not transcript:
+        return None
+    last_title: str | None = None
+    try:
+        with transcript.open(encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if rec.get("type") == "custom-title":
+                    t = rec.get("customTitle")
+                    if t:
+                        last_title = t
+    except OSError:
+        return None
+    return last_title
 
 
 def append_session(session_id: str, message: dict[str, Any]) -> None:
@@ -192,21 +334,33 @@ def list_sessions() -> list[dict[str, Any]]:
                         continue
         except OSError:
             continue
+        # Authoritative source: Claude Code's `/rename`. Falls back to any
+        # label we previously stored, then to the raw session id.
+        label = custom_title_from_transcript(f.stem) or last_label or f.stem
         out.append(
             {
                 "id": f.stem,
-                "label": last_label or f.stem,
+                "label": label,
                 "mtime": f.stat().st_mtime,
             }
         )
     return out
 
 
+def _resolve_label(session_id: str, fallback: str | None) -> str | None:
+    """Always prefer the live `/rename` title from Claude Code's transcript
+    over what the client sent. Avoids the bug where Clear-ing the lens feed
+    loses the label and new messages show the raw UUID until the next push.
+    """
+    title = custom_title_from_transcript(session_id)
+    return title or fallback
+
+
 @app.post("/push")
 async def push(payload: PushPayload) -> dict[str, Any]:
     msg = {
         "session_id": payload.session_id,
-        "session_label": payload.session_label,
+        "session_label": _resolve_label(payload.session_id, payload.session_label),
         "role": payload.role,
         "content": payload.content,
         "ts": payload.ts or time.time(),
@@ -221,7 +375,7 @@ async def push(payload: PushPayload) -> dict[str, Any]:
 async def push_input(payload: InputPayload) -> dict[str, Any]:
     msg = {
         "session_id": payload.session_id,
-        "session_label": payload.session_label,
+        "session_label": _resolve_label(payload.session_id, payload.session_label),
         "role": "user",
         "content": payload.text,
         "ts": time.time(),
