@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200" aria-label="claude-lens logo">
+  <title>claude-lens</title>
+  <!-- outer housing ring (ink) -->
+  <circle cx="100" cy="100" r="80" fill="none" stroke="#141413" stroke-width="8"/>
+  <!-- aperture ring (coral) -->
+  <circle cx="100" cy="100" r="55" fill="none" stroke="#cc785c" stroke-width="7"/>
+  <!-- pupil (filled coral) -->
+  <circle cx="100" cy="100" r="25" fill="#cc785c"/>
+  <!-- glint highlight (cream) -->
+  <circle cx="82.5" cy="82.5" r="8" fill="#faf9f5"/>
+</svg>

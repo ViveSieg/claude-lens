@@ -1,6 +1,8 @@
 <p align="center">
-  <img src="https://capsule-render.vercel.app/api?type=waving&color=0:cc785c,100:e8a55a&height=200&section=header&text=claude-lens&fontSize=72&fontColor=faf9f5&animation=fadeIn&fontAlignY=40" alt="claude-lens" />
+  <img src="assets/logo.svg" width="120" alt="claude-lens logo" />
 </p>
+
+<h1 align="center">claude-lens</h1>
 
 <p align="center">
   <i>See Claude clearly.</i><br>

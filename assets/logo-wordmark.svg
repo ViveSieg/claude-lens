@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 200" width="640" height="200" aria-label="claude-lens">
+  <title>claude-lens</title>
+  <!-- mark on the left -->
+  <g transform="translate(40 40)">
+    <circle cx="60" cy="60" r="50" fill="none" stroke="#141413" stroke-width="6"/>
+    <circle cx="60" cy="60" r="34" fill="none" stroke="#cc785c" stroke-width="5"/>
+    <circle cx="60" cy="60" r="16" fill="#cc785c"/>
+    <circle cx="49.5" cy="49.5" r="5" fill="#faf9f5"/>
+  </g>
+  <!-- wordmark on the right -->
+  <text x="190" y="120"
+        font-family="Crimson Pro, Tiempos Headline, Georgia, serif"
+        font-size="84"
+        font-weight="500"
+        fill="#141413"
+        letter-spacing="-2">
+    claude<tspan fill="#cc785c">·</tspan>lens
+  </text>
+</svg>
