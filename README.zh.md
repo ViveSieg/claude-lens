@@ -116,28 +116,63 @@ npm install -g claude-lens
 
 ## 可选：接 NotebookLM 知识库
 
-如果你有一个 NotebookLM notebook（课程资料、论文、文档）想让 Claude 从里面取事实，跑 `/tutor init` 走向导。
+`/tutor` 是个向导，把一个 **NotebookLM notebook**（课程资料 / 论文 / 内部文档）当作**只读知识库**接进当前项目，并把 Claude 锁进一条铁律：**回答里出现的每一条领域事实都必须来自 notebook，覆盖不到就明说**。
 
-向导会：
+### 第一次接入 — `/tutor init`
 
-1. 检查工具装齐没有
-2. 列出你的 notebook，让你挑一个当**知识库**
-3. 让你挑一个**角色**给 Claude
-4. 生成一份 `CLAUDE.md`，把契约锁进去
+在你项目目录里：
 
-### 5 个内置角色
+```
+cd path/to/your/project
+claude
+```
+
+进入 Claude Code 后：
+
+```
+/tutor init
+```
+
+向导四步：
+
+**1. Doctor** —— 检查 Node、npm、`notebooklm-client` 包、Google 登录态。`notebooklm-client` 没装会问你 `npm i -g notebooklm-client`；Google session 没有会跑 `npx notebooklm export-session` 弹浏览器让你登录一次。
+
+**2. 选 notebook** —— 列出你账号下所有 NotebookLM notebook，选一个绑给**当前项目**。向导记下它的 id 和 title。
+
+**3. 选角色** —— 5 个内置角色 + 1 个 custom（见下表）。
+
+**4. 生成 `CLAUDE.md` + `AGENTS.md`** 到项目根，把 notebook id、title、角色全 bake 进去。以后这个目录里跑 `claude`，自动加载这套契约。
+
+### 子命令
+
+| 命令 | 功能 |
+|---|---|
+| `/tutor init` | 完整向导（上面四步） |
+| `/tutor doctor` | 只跑工具检查——`npm i` 完或者重新登录 Google 后用 |
+| `/tutor notebook` | 重新选 notebook（角色不变） |
+| `/tutor role` | 重新选角色（notebook 不变） |
+| `/tutor ask "<问题>"` | 一次性问当前 notebook，原样保留 `[1][2]` 引用 |
+
+### 内置角色
 
 | 角色 | 适用 |
 |---|---|
-| **research-advisor** | 一堆论文 — 研究流程，带引用 |
-| **exam-reviewer** | 课程资料 — 考前复习、考点、易错点 |
-| **socratic** | 用反问让你自己想明白，不直接给答案 |
-| **librarian** | 纯检索，零评论，只给原文引用 |
-| **general** | 兜底通用 |
+| **research-advisor** | 一堆论文 — 研究流程，输出 `资料显示 / 我做了什么 / 结论 / 资料没覆盖的` |
+| **exam-reviewer** | 课程资料 — 考前复习，输出 `资料显示 / 我怎么讲 / 考点整理 / 解题方法 / 易错点 / 结论 / 资料没覆盖的` |
+| **socratic** | 用反问让你自己想明白，输出 `我反问你 (3 题) / 校对 / 资料没覆盖的` |
+| **librarian** | 纯检索零评论，输出 `资料显示 / 来源对照表 / 资料未覆盖` |
+| **general** | 兜底通用，输出 `资料显示 / 我的处理 / 结论 / 资料没覆盖的` |
+| **custom** | 自己定义（向导第 3 步选 6），契约部分仍然由向导帮你锁好 |
+
+### 设置完就直接对话
+
+`CLAUDE.md` 生成后，这个项目里 Claude 的每一条回复都会先通过 `notebooklm-client` 查 notebook，再按所选角色的格式重新打包。**不用再敲任何命令**。
+
+配合 `/lens on`，回复就实时渲染到浏览器 tab 里——LaTeX 公式、Mermaid 图、代码高亮全有，对带公式的课特别合适（`exam-reviewer` 角色就是默认假设你开了 lens 的）。
 
 ### 让这套真正有用的契约
 
-每个角色都强制一条铁律：**Claude 输出的每一条领域事实，都必须来自 notebook**。Claude 可以重组、加类比、出题、写代码——**但不能编 notebook 没有的事实**。如果资料没覆盖，必须明说。
+每个角色都强制：**Claude 输出的每一条领域事实，都必须来自 notebook**。Claude 可以重组、加类比、出题、写代码——**但不能编 notebook 没有的事实**。如果资料没覆盖，必须明说。Notebook 答案里的 `[1][2]` 引用会**原样保留**。
 
 这让你能信任答案的程度，远超普通聊天。Notebook 是事实源，Claude 是上面的"会讲课的解释器"。
 

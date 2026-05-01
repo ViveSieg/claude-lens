@@ -135,32 +135,85 @@ Stop with `/lens off`.
 
 ## Optional: connect a NotebookLM notebook
 
-Got a notebook (course materials, papers, docs) you want Claude to pull
-facts from? Run `/tutor init` and walk through the wizard.
+`/tutor` is a wizard that wires a **NotebookLM notebook** (your course
+materials, papers, internal docs) into the project as a **read-only**
+knowledge base, and locks Claude into a contract: *every domain fact in
+the answer must come from the notebook, or Claude must explicitly say
+"not covered."*
 
-It will:
+### First-time setup — `/tutor init`
 
-1. Check your tools are installed.
-2. List your NotebookLM notebooks — pick one as the **knowledge base**.
-3. Pick a **role** for Claude.
-4. Generate a `CLAUDE.md` that locks in the contract.
+In any terminal in your project directory:
+
+```
+cd path/to/your/project
+claude
+```
+
+Then inside Claude Code:
+
+```
+/tutor init
+```
+
+The wizard walks four steps:
+
+**1. Doctor** — checks Node, npm, the `notebooklm-client` package, and
+   that you've signed into Google once. If `notebooklm-client` is
+   missing it offers `npm i -g notebooklm-client`. If the Google session
+   is missing it runs `npx notebooklm export-session` and pops a browser
+   for you to sign in.
+
+**2. Pick a notebook** — lists your existing NotebookLM notebooks and
+   asks you to choose the one for *this* project. The wizard captures
+   its id + title.
+
+**3. Pick a role** — five built-ins or a custom one (table below).
+
+**4. Render `CLAUDE.md` + `AGENTS.md`** in the project root, with the
+   notebook id, title, and chosen role baked in. Future `claude`
+   sessions in this directory automatically pick up the contract.
+
+### Sub-commands
+
+| Command | What it does |
+|---|---|
+| `/tutor init` | Full interactive setup (the four steps above). |
+| `/tutor doctor` | Re-run the tool/auth check only — useful after `npm i -g notebooklm-client` or re-login. |
+| `/tutor notebook` | Re-pick the notebook for this project (keeps role). |
+| `/tutor role` | Re-pick the role (keeps notebook). |
+| `/tutor ask "<question>"` | One-shot: query the bound notebook and print the answer with `[1][2]` citations preserved. |
 
 ### Roles you can pick
 
 | Role | Best for |
 |---|---|
-| **research-advisor** | A pile of papers — research workflow with citations. |
-| **exam-reviewer** | Course materials — exam prep, key points, common mistakes. |
-| **socratic** | Learn by being asked questions instead of told answers. |
-| **librarian** | Pure quote retrieval, no commentary. |
-| **general** | A flexible default for anything else. |
+| **research-advisor** | A pile of papers — research workflow with `资料显示 / 我做了什么 / 结论 / 资料没覆盖的`. |
+| **exam-reviewer** | Course materials — exam prep with `资料显示 / 我怎么讲 / 考点整理 / 解题方法 / 易错点 / 结论 / 资料没覆盖的`. |
+| **socratic** | Learn by being asked. Outputs `我反问你 (3 题) / 校对 / 资料没覆盖的`. |
+| **librarian** | Pure quote retrieval, no commentary. Outputs `资料显示 / 来源对照表 / 资料未覆盖`. |
+| **general** | Flexible default — `资料显示 / 我的处理 / 结论 / 资料没覆盖的`. |
+| **custom** | Roll your own (`/tutor init` step 3, option 6). The wizard still wires in the contract. |
+
+### After setup, just talk
+
+Once `CLAUDE.md` is generated, every reply Claude gives in this project
+queries the notebook first via `notebooklm-client` (the integration is
+called from inside the role's prompt), then repackages the answer in the
+chosen format. No further commands needed.
+
+If you also run `/lens on`, replies stream into your browser tab with
+proper LaTeX, Mermaid diagrams, and code highlighting — useful for
+courses with formulas (the `exam-reviewer` role assumes this).
 
 ### The contract that makes this useful
 
-Every role enforces one rule: **anything Claude says about your topic must
-come from the notebook**. Claude can rephrase, restructure, draw analogies,
-quiz you, write code — but it can't make up facts that aren't in the
-notebook. If something isn't covered, Claude has to say so.
+Every role enforces one rule: **anything Claude says about your topic
+must come from the notebook**. Claude can rephrase, restructure, draw
+analogies, quiz you, write code — but it cannot make up facts that
+aren't in the notebook. If something isn't covered, Claude has to say
+so explicitly. Citations like `[1][2]` from the notebook are preserved
+verbatim in answers.
 
 You can trust the answers in a way you can't with vanilla chat. The
 notebook is your source of truth; Claude is the smart explainer on top.
