@@ -114,10 +114,17 @@ async function loadSessions() {
 function renderSessionList(sessions) {
   els.sessionList.innerHTML = "";
 
-  // "+ New session" button always at top
+  // "+ New scratchpad" button always at top.
+  // Naming note: this creates a manual mirror bucket (for notes / render tests
+  // / demos). It does NOT start a new Claude Code conversation — those appear
+  // automatically when the Stop hook fires from any running `claude` process.
   const addBtn = document.createElement("button");
   addBtn.className = "session-add";
-  addBtn.textContent = "＋ New session";
+  addBtn.textContent = "＋ New scratchpad";
+  addBtn.title =
+    "Create a manual mirror bucket for notes, demos, or render tests.\n" +
+    "Does NOT start a new Claude conversation — those auto-appear when " +
+    "you run `claude` in any terminal.";
   addBtn.onclick = createSession;
   els.sessionList.appendChild(addBtn);
 
@@ -165,11 +172,16 @@ function renderSessionList(sessions) {
 }
 
 async function createSession() {
-  const name = prompt("Session name (letters, digits, dash, underscore):", "");
+  const name = prompt(
+    "Scratchpad name (letters, digits, dash, underscore).\n" +
+      "This creates a manual bucket for notes / render tests, " +
+      "NOT a new Claude conversation.",
+    ""
+  );
   if (!name) return;
   const safe = name.trim().replace(/[^A-Za-z0-9_-]/g, "-");
   if (!safe) {
-    alert("Invalid session name.");
+    alert("Invalid scratchpad name.");
     return;
   }
   try {
@@ -180,7 +192,7 @@ async function createSession() {
     });
     const data = await r.json();
     if (!data.ok) {
-      alert("Could not create session: " + (data.error || "unknown error"));
+      alert("Could not create scratchpad: " + (data.error || "unknown error"));
       return;
     }
     await loadSessions();
@@ -191,14 +203,12 @@ async function createSession() {
 }
 
 async function deleteSession(id) {
-  if (!confirm(`Delete session "${id}"? This removes its history file.`)) return;
+  // (legacy name kept; works for both auto-created sessions and scratchpads)
+  if (!confirm(`Delete "${id}"? This removes its history file.`)) return;
   try {
     await fetch(`/session/${encodeURIComponent(id)}`, { method: "DELETE" });
     await loadSessions();
-    if (id === currentSession) {
-      // Fall back to default if we deleted the active session.
-      switchSession("default");
-    }
+    if (id === currentSession) switchSession("default");
   } catch (e) {
     console.warn("deleteSession failed", e);
   }
