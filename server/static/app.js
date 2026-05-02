@@ -251,7 +251,10 @@ function switchSession(id, opts = {}) {
   // session uploaded under, and counter [imageN] should restart from 1
   // so the user sees a clean numbering each time.
   resetPasteState();
-  loadHistory();
+  // Explicit session switch → land on the latest reply of the new
+  // conversation (saved scroll position is from the OLD session and
+  // means nothing here).
+  loadHistory({ toBottom: true });
   loadSessions();
   reconnectWs();
 }
@@ -294,7 +297,25 @@ async function renameCurrentSession() {
 
 // ---------- history ----------
 
-async function loadHistory() {
+async function loadHistory(opts = {}) {
+  // Strict no-auto-scroll policy: NEW MESSAGES NEVER PULL THE FEED.
+  // The user reads at their own pace, period. We only scroll to bottom
+  // when:
+  //   1. opts.toBottom is true (explicit caller intent — switchSession)
+  //   2. this is the very first render of a session (empty feed → land on latest)
+  //
+  // We do NOT auto-follow even when the user happens to be at the
+  // bottom — that classic "chat client" behavior is exactly what the
+  // user complained about: they were reading older messages and got
+  // yanked away by a new reply (or by a poller-driven reload event).
+  const m = els.messages;
+  const isFirstLoad = m.children.length === 0 ||
+    m.querySelector(".empty-state") !== null;
+  // Capture exact scrollTop so we can restore it pixel-perfect after
+  // the re-render. innerHTML="" resets scrollTop to 0, hence the snapshot.
+  const savedScrollTop = m.scrollTop;
+  const goToBottom = opts.toBottom === true || isFirstLoad;
+
   els.messages.innerHTML = "";
   messageCache = [];
   try {
@@ -322,7 +343,16 @@ async function loadHistory() {
       shown++;
     }
     els.feedMeta.textContent = `${shown} message${shown !== 1 ? "s" : ""}`;
-    requestAnimationFrame(() => scrollBottom(true));
+    requestAnimationFrame(() => {
+      if (goToBottom) {
+        // First load OR explicit session switch → land on the latest reply.
+        scrollBottom(true);
+      } else {
+        // Any other re-render (poller reload, WS reconnect) — restore the
+        // user's exact scroll position so they keep reading where they were.
+        els.messages.scrollTop = savedScrollTop;
+      }
+    });
     rebuildToc();
   } catch (e) {
     console.error("loadHistory failed", e);
