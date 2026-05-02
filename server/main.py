@@ -120,32 +120,87 @@ def _kill_orphan_listeners() -> None:
 _kill_orphan_listeners()
 
 CLEANUP_INTERVAL_SEC = float(os.environ.get("CLAUDE_IRIS_CLEANUP_INTERVAL", "21600"))  # 6h
+POLL_INTERVAL_SEC = float(os.environ.get("CLAUDE_IRIS_POLL_INTERVAL", "2"))
+POLL_RECENT_WINDOW_SEC = float(os.environ.get("CLAUDE_IRIS_POLL_WINDOW", "600"))  # 10min
+
+
+async def _cleanup_loop() -> None:
+    while True:
+        try:
+            await asyncio.sleep(CLEANUP_INTERVAL_SEC)
+        except asyncio.CancelledError:
+            return
+        try:
+            _cleanup_uploads(UPLOAD_TTL_DAYS)
+            _cleanup_sessions(SESSION_TTL_DAYS)
+        except Exception:
+            pass
+
+
+async def _transcript_poller() -> None:
+    """Tail Claude Code's transcript directory and backfill on changes.
+
+    Stop hook is the low-latency primary path, but Claude Code only loads
+    hook config at session start — sessions started before /iris on (or
+    while iris was off) never push, so their replies never reach the
+    mirror. Polling closes that gap: scan for transcripts touched in the
+    last `POLL_RECENT_WINDOW_SEC`, dedup by (mtime, size), invoke backfill
+    on changes. Backfill's own fingerprint dedup prevents double-import
+    when both the hook and the poller catch the same turn.
+
+    Set CLAUDE_IRIS_POLL_INTERVAL=0 to disable.
+    """
+    if POLL_INTERVAL_SEC <= 0:
+        return
+    seen: dict[str, tuple[float, int]] = {}
+    while True:
+        try:
+            await asyncio.sleep(POLL_INTERVAL_SEC)
+        except asyncio.CancelledError:
+            return
+        try:
+            if not CLAUDE_PROJECTS_DIR.exists():
+                continue
+            cutoff = time.time() - POLL_RECENT_WINDOW_SEC
+            for f in CLAUDE_PROJECTS_DIR.glob("*/*.jsonl"):
+                try:
+                    stat = f.stat()
+                except OSError:
+                    continue
+                if stat.st_mtime < cutoff:
+                    continue
+                key = (stat.st_mtime, stat.st_size)
+                fkey = str(f)
+                if seen.get(fkey) == key:
+                    continue
+                seen[fkey] = key
+                session_id = f.stem
+                if not all(c.isalnum() or c in "-_" for c in session_id):
+                    continue
+                try:
+                    await backfill_session_from_transcript(session_id)
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
-    """Re-run upload + session TTL pruning every 6 hours.
+    """Background tasks for the server lifetime.
 
-    Without this, a server that runs for weeks never trims old files
-    after the one-shot startup pass.
+    - cleanup: re-run upload/session TTL every 6h.
+    - poller: watch Claude Code transcripts for activity that the Stop
+      hook might have missed (e.g. sessions started before hook was
+      registered). Both fingerprint-dedupe through backfill.
     """
-    async def loop() -> None:
-        while True:
-            try:
-                await asyncio.sleep(CLEANUP_INTERVAL_SEC)
-            except asyncio.CancelledError:
-                return
-            try:
-                _cleanup_uploads(UPLOAD_TTL_DAYS)
-                _cleanup_sessions(SESSION_TTL_DAYS)
-            except Exception:
-                pass
-
-    task = asyncio.create_task(loop())
+    cleanup = asyncio.create_task(_cleanup_loop())
+    poller = asyncio.create_task(_transcript_poller())
     try:
         yield
     finally:
-        task.cancel()
+        cleanup.cancel()
+        poller.cancel()
 
 
 app = FastAPI(title="claude-iris", lifespan=_lifespan)
@@ -308,6 +363,22 @@ listener = ListenerManager()
 def session_file(session_id: str) -> Path:
     safe = "".join(c for c in session_id if c.isalnum() or c in "-_") or "default"
     return SESSION_DIR / f"{safe}.jsonl"
+
+
+def session_tombstone(session_id: str) -> Path:
+    """Marker file written by DELETE.
+
+    The poller would otherwise re-import a hard-deleted session within
+    seconds (the Claude Code transcript still exists). Tombstone tells
+    the poller, list_sessions, and backfill to skip this id. Manual
+    restore: delete the .deleted file with `rm`.
+    """
+    safe = "".join(c for c in session_id if c.isalnum() or c in "-_") or "default"
+    return SESSION_DIR / f"{safe}.deleted"
+
+
+def is_tombstoned(session_id: str) -> bool:
+    return session_tombstone(session_id).exists()
 
 
 # Path where Claude Code stores its own per-session JSONL transcripts. We
@@ -488,8 +559,13 @@ async def backfill_session_from_transcript(session_id: str) -> int:
 
     Dedup by (role, first 200 chars of content) so re-runs are idempotent.
     Runs under the per-session write lock so concurrent /push from a Stop
-    hook can't interleave bytes inside a backfilled jsonl line.
+    hook can't interleave bytes inside a backfilled jsonl line. When new
+    turns are imported, broadcasts reload + session_touch so any open
+    page picks them up immediately. Tombstoned sessions (DELETE'd) skip
+    entirely so the poller can't silently revive them.
     """
+    if is_tombstoned(session_id):
+        return 0
     transcript = find_claude_transcript(session_id)
     if not transcript:
         return 0
@@ -532,7 +608,10 @@ async def backfill_session_from_transcript(session_id: str) -> int:
                 },
             )
             appended += 1
-        return appended
+    if appended:
+        await hub.broadcast(session_id, {"type": "reload"})
+        await hub.broadcast("__index__", {"type": "session_touch", "session": session_id})
+    return appended
 
 
 def custom_title_from_transcript(session_id: str) -> str | None:
@@ -666,6 +745,11 @@ def _resolve_label(session_id: str, fallback: str | None) -> str | None:
 
 @app.post("/push")
 async def push(payload: PushPayload) -> dict[str, Any]:
+    # Stop hook fired for a session the user explicitly deleted — respect
+    # the deletion, don't silently revive. /input would lift the tombstone
+    # since that's an explicit user action.
+    if is_tombstoned(payload.session_id):
+        return {"ok": True, "ignored": "tombstoned"}
     msg = {
         "session_id": payload.session_id,
         "session_label": _resolve_label(payload.session_id, payload.session_label),
@@ -681,6 +765,15 @@ async def push(payload: PushPayload) -> dict[str, Any]:
 
 @app.post("/input")
 async def push_input(payload: InputPayload) -> dict[str, Any]:
+    # /input is an explicit user action — typing here means "I want this
+    # session active again." Lift any tombstone so future /push and the
+    # poller stop ignoring this id.
+    tomb = session_tombstone(payload.session_id)
+    if tomb.exists():
+        try:
+            tomb.unlink()
+        except OSError:
+            pass
     msg = {
         "session_id": payload.session_id,
         "session_label": _resolve_label(payload.session_id, payload.session_label),
@@ -807,13 +900,9 @@ async def get_sessions() -> dict[str, Any]:
 
 @app.get("/session/{session_id}")
 async def get_session(session_id: str) -> dict[str, Any]:
+    # backfill broadcasts reload + session_touch internally when it imports.
     backfilled = await backfill_session_from_transcript(session_id)
     messages = load_session(session_id)
-    if backfilled:
-        # Notify any open WS clients to refresh; cheaper than re-broadcasting
-        # every backfilled message individually.
-        await hub.broadcast(session_id, {"type": "reload"})
-        await hub.broadcast("__index__", {"type": "session_touch", "session": session_id})
     return {"session_id": session_id, "messages": messages, "backfilled": backfilled}
 
 
@@ -844,7 +933,13 @@ async def clear_session(session_id: str) -> dict[str, Any]:
 
 @app.delete("/session/{session_id}")
 async def delete_session(session_id: str) -> dict[str, Any]:
-    """Permanently remove the session file. The sidebar drops it.
+    """Permanently remove the session file and prevent re-import.
+
+    Writes a tombstone (`.deleted`) so the transcript poller doesn't
+    silently revive the session within seconds — Claude Code's transcript
+    still exists, the poller would otherwise re-walk it and re-create the
+    iris jsonl. To bring a deleted session back manually:
+        rm ~/.claude-iris/sessions/<session-id>.deleted
 
     Use POST /session/{id}/clear instead if you want to keep the bucket
     but empty its feed.
@@ -854,6 +949,7 @@ async def delete_session(session_id: str) -> dict[str, Any]:
     async with _write_lock(safe):
         if p.exists():
             p.unlink()
+        session_tombstone(safe).touch()
     await hub.broadcast("__index__", {"type": "session_removed", "session": safe})
     return {"ok": True}
 

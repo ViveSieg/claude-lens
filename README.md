@@ -231,6 +231,15 @@ via Quartz (`CGEventPostToPid`) so the terminal never steals focus from your
 browser tab. If the server isn't running, the hook quietly does nothing —
 your terminal is never blocked.
 
+**Two-path safety net.** Claude Code only reads hook config at session start,
+so a Claude conversation that was already running before `/iris on` doesn't
+hold the Stop hook and won't push. iris closes the gap by polling
+`~/.claude/projects/*/<sid>.jsonl` every 2s (`CLAUDE_IRIS_POLL_INTERVAL`) for
+transcripts touched in the last 10 minutes, importing any new turns directly.
+Both paths share fingerprint-based dedup, so you never get duplicates. **Net
+effect:** every assistant turn from every running Claude session lands in the
+browser within at most 2 seconds, with or without the hook.
+
 **Browser → terminal pipeline (macOS):**
 1. You type in the iris input bar; press Send.
 2. Server writes the text to a FIFO; listener reads it.
@@ -259,7 +268,11 @@ token as a 280×220 thumbnail. Old uploads are auto-pruned (default 7 days).
 | `CLAUDE_IRIS_DATA` | `~/.claude-iris` | Where session files live. |
 | `CLAUDE_IRIS_LISTEN_GRACE` | `30` | Seconds to wait after browser closes before stopping the typing-listener. |
 | `CLAUDE_IRIS_FOCUS` | *(auto)* | macOS: name of the terminal app to paste into (e.g. `Ghostty`, `Terminal`, `iTerm`). Auto-detected from `$TERM_PROGRAM` when the server starts; set this to override. |
-| `CLAUDE_IRIS_UPLOAD_TTL_DAYS` | `7` | macOS/Linux: delete pasted-image files older than N days at server startup. `0` disables cleanup. |
+| `CLAUDE_IRIS_UPLOAD_TTL_DAYS` | `7` | Delete pasted-image files older than N days (at startup and every 6h). `0` disables. |
+| `CLAUDE_IRIS_SESSION_TTL_DAYS` | `30` | Delete session jsonls untouched for N days. `0` disables. |
+| `CLAUDE_IRIS_POLL_INTERVAL` | `2` | Transcript fallback poll interval (seconds). `0` disables polling and relies on the Stop hook only. |
+| `CLAUDE_IRIS_POLL_WINDOW` | `600` | Polling only considers transcripts modified in the last N seconds. |
+| `CLAUDE_IRIS_CLEANUP_INTERVAL` | `21600` | Background TTL sweep period (seconds, default 6h). |
 
 ---
 
@@ -278,7 +291,15 @@ After granting, restart the terminal and run `/iris restart`.
 
 **Replies stop appearing in the browser**
 The Stop hook may have been removed from `~/.claude/settings.json`. Run
-`/iris on` to put it back.
+`/iris on` to put it back. Even if the hook is genuinely missing, the
+2-second transcript poller will catch up new turns automatically.
+
+**A session I × out of the sidebar comes back later**
+That's not happening — DELETE writes a tombstone (`~/.claude-iris/sessions/<id>.deleted`) that the poller respects, so a hard-deleted session stays gone. To bring one back manually:
+```bash
+rm ~/.claude-iris/sessions/<session-id>.deleted
+```
+Or just type into the iris input bar with that session selected — `/input` lifts the tombstone automatically (treats typing as explicit re-engagement).
 
 **`/tutor init` says NotebookLM tools are missing**
 `npm i -g notebooklm-client`, then `npx notebooklm export-session` to log

@@ -566,8 +566,11 @@ function connectIndexWs() {
       if (!id || id === "default" || id === "__index__") return;
       // Always refresh the sidebar so newly active sessions appear.
       loadSessions();
-      // Auto-follow if the user hasn't pinned a session.
-      if (!pinnedSession && id !== currentSession) {
+      // Auto-follow if the user hasn't pinned, OR if they're currently
+      // sitting on the synthetic "default" bucket (which is never a
+      // real conversation — any real session arriving should win).
+      const onDefault = currentSession === "default";
+      if ((!pinnedSession || onDefault) && id !== currentSession) {
         switchSession(id, { pin: false });
       }
     } else if (data.type === "session_removed") {
@@ -649,7 +652,14 @@ els.inputForm.addEventListener("submit", async (e) => {
   // Typing into the input is an explicit engagement with this session —
   // pin so a __index__ session_touch from another concurrent Claude
   // session doesn't yank the page away mid-conversation.
-  pinnedSession = true;
+  // BUT: never pin to the synthetic "default" bucket. When the user types
+  // before any real Claude session has registered (sidebar shows "No
+  // sessions yet"), the listener pastes into the terminal, Claude replies,
+  // and Stop hook pushes to the real UUID. We *want* the page to jump
+  // there — pinning to "default" would leave it stuck without the reply.
+  if (currentSession !== "default") {
+    pinnedSession = true;
+  }
   // Expand `[imageN]` aliases back to `[image: /full/path]` before sending
   // so the listener types a path the terminal-side Claude can resolve.
   const text = expandPasteAliases(raw);

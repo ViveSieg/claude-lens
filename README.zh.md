@@ -174,6 +174,8 @@ claude
 
 Claude 在终端结束一条回复时，Stop hook 读取该消息并发送至本地服务。服务将其持久化存档，并通过 WebSocket 推送至浏览器标签页进行渲染。用户在浏览器中输入时执行反向流程：listener 通过剪贴板将内容粘贴至终端。**macOS 平台默认采用 Quartz `CGEventPostToPid` 实现后台粘贴**——终端不会被切换至前台，焦点始终保持在浏览器标签页。如服务未启动，hook 静默退出，**不会阻塞终端**。
 
+**双路径兜底：** Claude Code 仅在会话启动时读取一次 hook 配置。在 `/iris on` 之前就已开启的会话不会持有 Stop hook，因此其回复不会推送至 iris。为此服务每 2 秒（`CLAUDE_IRIS_POLL_INTERVAL`）扫描一次 `~/.claude/projects/*/<sid>.jsonl` 中最近 10 分钟内修改过的转录文件，将新轮次自动回填至 iris session 并广播至浏览器。两条路径共用基于 `(role, content[:200])` 的指纹去重，不会重复入库。**结果：无论 Stop hook 是否生效，所有 Claude 会话的最新对话最迟 2 秒后必然出现在浏览器中。**
+
 **浏览器至终端链路（macOS）：**
 1. 用户在浏览器输入框输入文本并发送
 2. 服务器将文本写入 FIFO；listener 读取
@@ -196,7 +198,11 @@ Claude 在终端结束一条回复时，Stop hook 读取该消息并发送至本
 | `CLAUDE_IRIS_DATA` | `~/.claude-iris` | session 文件存储位置 |
 | `CLAUDE_IRIS_LISTEN_GRACE` | `30` | 浏览器关闭后停止输入注入器的延迟秒数 |
 | `CLAUDE_IRIS_FOCUS` | *(自动检测)* | macOS：粘贴目标终端 App 名称（如 `Ghostty`、`Terminal`、`iTerm`），默认基于 `$TERM_PROGRAM` 自动识别；可手动指定以覆盖默认值 |
-| `CLAUDE_IRIS_UPLOAD_TTL_DAYS` | `7` | 服务启动时清理超过 N 天的图片文件，设为 `0` 禁用清理 |
+| `CLAUDE_IRIS_UPLOAD_TTL_DAYS` | `7` | 清理超过 N 天的图片文件（启动时与每 6h 自动复查），设为 `0` 禁用清理 |
+| `CLAUDE_IRIS_SESSION_TTL_DAYS` | `30` | 清理 N 天未修改的 session jsonl，设为 `0` 禁用清理 |
+| `CLAUDE_IRIS_POLL_INTERVAL` | `2` | transcript 兜底轮询间隔（秒）；设为 `0` 完全关闭轮询，仅依赖 Stop hook |
+| `CLAUDE_IRIS_POLL_WINDOW` | `600` | 轮询只考虑最近 N 秒内修改过的 transcript |
+| `CLAUDE_IRIS_CLEANUP_INTERVAL` | `21600` | 后台 TTL 清理周期（秒，默认 6h） |
 
 ---
 
@@ -212,7 +218,14 @@ Claude 在终端结束一条回复时，Stop hook 读取该消息并发送至本
 授权后重启终端，并执行 `/iris restart`。
 
 **回复不再出现于浏览器**
-Stop hook 可能已从 `~/.claude/settings.json` 中移除。重新执行 `/iris on` 即可恢复。
+Stop hook 可能已从 `~/.claude/settings.json` 中移除。重新执行 `/iris on` 即可恢复。即便 Stop hook 真的没装，最迟 2 秒后 transcript 轮询会兜底把新轮次同步进来。
+
+**侧栏 × 删除的 session 凭空消失但 transcript 还在**
+属于设计：DELETE 会写一份 `~/.claude-iris/sessions/<id>.deleted` 墓碑文件，阻止轮询将其复活。如需恢复某个被删除的会话：
+```bash
+rm ~/.claude-iris/sessions/<session-id>.deleted
+```
+或直接在 iris 输入框对该 session 打字，墓碑将被自动移除。
 
 **`/tutor init` 提示 NotebookLM 工具缺失**
 执行 `npm i -g notebooklm-client`，再运行 `npx notebooklm export-session` 完成 Google 登录，最后重新运行向导。

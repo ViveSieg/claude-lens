@@ -1,0 +1,14 @@
+# Python build artifacts — never ship bytecode.
+__pycache__/
+*.pyc
+*.pyo
+
+# Local virtualenv — created by install.sh on the consumer side.
+server/.venv/
+
+# Iris runtime data dirs that might exist in dev clones.
+.claude-iris/
+
+# CI / scratch
+*.tgz
+.DS_Store

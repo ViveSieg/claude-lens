@@ -1,6 +1,6 @@
 {
   "name": "claude-iris",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "publishConfig": {
     "access": "public"
   },
@@ -9,16 +9,19 @@
     "claude-iris": "bin/claude-iris-cli.js"
   },
   "files": [
-    "bin/",
+    "bin/*.js",
+    "bin/claude-iris",
+    "bin/listen.py",
     "commands/",
-    "hooks/",
+    "hooks/*.py",
     "roles/",
     "server/main.py",
     "server/requirements.txt",
     "server/static/",
     "install.sh",
     "LICENSE",
-    "README.md"
+    "README.md",
+    "README.zh.md"
   ],
   "engines": {
     "node": ">=18"
