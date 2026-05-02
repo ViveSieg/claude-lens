@@ -297,65 +297,89 @@ async function renameCurrentSession() {
 
 // ---------- history ----------
 
-async function loadHistory(opts = {}) {
-  // Strict no-auto-scroll policy: NEW MESSAGES NEVER PULL THE FEED.
-  // The user reads at their own pace, period. We only scroll to bottom
-  // when:
-  //   1. opts.toBottom is true (explicit caller intent — switchSession)
-  //   2. this is the very first render of a session (empty feed → land on latest)
-  //
-  // We do NOT auto-follow even when the user happens to be at the
-  // bottom — that classic "chat client" behavior is exactly what the
-  // user complained about: they were reading older messages and got
-  // yanked away by a new reply (or by a poller-driven reload event).
-  const m = els.messages;
-  const isFirstLoad = m.children.length === 0 ||
-    m.querySelector(".empty-state") !== null;
-  // Capture exact scrollTop so we can restore it pixel-perfect after
-  // the re-render. innerHTML="" resets scrollTop to 0, hence the snapshot.
-  const savedScrollTop = m.scrollTop;
-  const goToBottom = opts.toBottom === true || isFirstLoad;
+function _msgFp(msg) {
+  // Same fingerprint scheme the server uses for backfill dedup so the
+  // frontend cache stays in sync with what the server sees.
+  return `${msg.role}::${(msg.content || "").slice(0, 200)}`;
+}
 
-  els.messages.innerHTML = "";
-  messageCache = [];
+async function loadHistory(opts = {}) {
+  // Strict policy: NEW MESSAGES NEVER PULL THE FEED.
+  //
+  // Two render modes:
+  //   1. Full re-render — used only for first load and explicit session
+  //      switch (opts.toBottom). Clears the DOM, renders all messages,
+  //      lands on the latest reply.
+  //   2. Incremental append — used for everything else (poller-driven
+  //      `reload`, WS reconnect). Diffs the response against the in-memory
+  //      cache and appends only messages we haven't seen yet. The
+  //      existing DOM is NEVER touched, so scrollTop NEVER changes —
+  //      no flash, no re-anchoring, no smooth-scroll animation.
+  const m = els.messages;
+  const isFirstLoad =
+    m.children.length === 0 || m.querySelector(".empty-state") !== null;
+  const fullRerender = opts.toBottom === true || isFirstLoad;
+
+  let messages;
   try {
     const r = await fetch(`/session/${currentSession}`);
     const data = await r.json();
+    messages = data.messages || [];
+  } catch (e) {
+    console.error("loadHistory failed", e);
+    return;
+  }
 
-    // Find latest label across history.
-    let latestLabel = null;
-    if (data.messages) {
-      for (const m of data.messages) {
-        if (m.session_label) latestLabel = m.session_label;
-      }
-    }
-    els.feedTitle.textContent = latestLabel || friendlyTitle(currentSession);
+  // Always refresh the title to pick up any /rename activity.
+  let latestLabel = null;
+  for (const msg of messages) {
+    if (msg.session_label) latestLabel = msg.session_label;
+  }
+  els.feedTitle.textContent = latestLabel || friendlyTitle(currentSession);
 
-    if (!data.messages || data.messages.length === 0) {
+  const visible = messages.filter(
+    (msg) => msg.role !== "system" && msg.role !== "_cleared"
+  );
+
+  // Detect "something was removed server-side" (Clear, DELETE, etc).
+  // Incremental append can't shrink the DOM, so we must fall back to
+  // full rerender in that case.
+  const visibleFps = new Set(visible.map(_msgFp));
+  const cacheLost = messageCache.some((m) => !visibleFps.has(_msgFp(m)));
+
+  if (fullRerender || cacheLost) {
+    els.messages.innerHTML = "";
+    messageCache = [];
+    if (visible.length === 0) {
       showEmpty();
       els.feedMeta.textContent = "— no messages yet —";
       return;
     }
-    let shown = 0;
-    for (const m of data.messages) {
-      if (m.role === "system" || m.role === "_cleared") continue; // hide internal meta records
-      appendMessage(m, false);
-      shown++;
+    for (const msg of visible) appendMessage(msg, false);
+    els.feedMeta.textContent = `${visible.length} message${visible.length !== 1 ? "s" : ""}`;
+    if (fullRerender) {
+      // First load / session switch → land on latest. cacheLost alone
+      // (e.g. Clear) leaves the user wherever they were since the
+      // remaining content is shorter anyway.
+      requestAnimationFrame(() => scrollBottom(true));
     }
-    els.feedMeta.textContent = `${shown} message${shown !== 1 ? "s" : ""}`;
-    requestAnimationFrame(() => {
-      if (goToBottom) {
-        // First load OR explicit session switch → land on the latest reply.
-        scrollBottom(true);
-      } else {
-        // Any other re-render (poller reload, WS reconnect) — restore the
-        // user's exact scroll position so they keep reading where they were.
-        els.messages.scrollTop = savedScrollTop;
-      }
-    });
     rebuildToc();
-  } catch (e) {
-    console.error("loadHistory failed", e);
+    return;
+  }
+
+  // Incremental path. Build a fingerprint set of what's currently in the
+  // DOM cache, append anything new at the end. The server orders by ts,
+  // so newcomers naturally fall at the end of `visible`.
+  const seen = new Set(messageCache.map(_msgFp));
+  let appended = 0;
+  for (const msg of visible) {
+    if (seen.has(_msgFp(msg))) continue;
+    appendMessage(msg, false);
+    appended++;
+  }
+  if (appended > 0) {
+    els.feedMeta.textContent = `${messageCache.length} message${messageCache.length !== 1 ? "s" : ""}`;
+    rebuildToc();
   }
 }
 
