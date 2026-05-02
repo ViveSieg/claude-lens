@@ -51,6 +51,14 @@ npm install -g claude-iris
 
 环境要求：macOS 或 Linux（或 [Windows 通过 WSL2](#windows-通过-wsl2)）、Python 3.10+、Node 18+、Claude Code。安装脚本启动时会做依赖预检，缺什么都会直接打印对应平台的 apt / brew 安装命令。
 
+**升级到新版本：**
+
+```bash
+npm i -g claude-iris@latest
+```
+
+会重新跑 post-install，自动同步 venv 依赖、刷新 slash 命令副本，新版的 `/iris`、`/tutor` 行为即时生效，不需要其他操作。
+
 ### <a id="windows-通过-wsl2"></a>Windows —— 通过 WSL2
 
 **原生 Windows 不支持。** 键盘注入层依赖 PyObjC（macOS）或 xdotool（Linux），二者均无法驱动 Windows Terminal。请改用 **WSL2**，这也是 Anthropic 官方为 Claude Code 推荐的 Windows 路径。镜像服务运行在 WSL Linux 内，浏览器在 Windows 宿主中打开。WSL 环境下浏览器页面进入 **只读模式**——助手回复正常实时显示，但页面输入框被隐藏（跨 WSL/Windows 边界无法可靠注入键盘事件到 Windows Terminal）。
@@ -248,6 +256,11 @@ Claude 在终端结束一条回复时，Stop hook 读取该消息并发送至本
 | `CLAUDE_IRIS_POLL_INTERVAL` | `2` | transcript 兜底轮询间隔（秒）；设为 `0` 完全关闭轮询，仅依赖 Stop hook |
 | `CLAUDE_IRIS_POLL_WINDOW` | `600` | 轮询只考虑最近 N 秒内修改过的 transcript |
 | `CLAUDE_IRIS_CLEANUP_INTERVAL` | `21600` | 后台 TTL 清理周期（秒，默认 6h） |
+| `CLAUDE_IRIS_TRANSCRIPT_CACHE_MAX` | `32` | LRU 上限：转录解析结果缓存的最大 session 数。每条记录是某个 session 的解析后轮次列表，调大用 RAM 换更少的 jsonl 重读。 |
+| `CLAUDE_IRIS_READ_ONLY` | *(未设置)* | 设为 `1` 强制开启只读模式（隐藏输入框、不启动 listener、`/input` 返 409）。WSL 自动检测，仅在 macOS/Linux 上测试只读 UI 时手动启用。 |
+| `CLAUDE_IRIS_ENDPOINT` | `http://127.0.0.1:7456/push` | Stop hook POST 目标。仅在你修改了 `CLAUDE_IRIS_HOST` / `CLAUDE_IRIS_PORT` 时才需要覆盖。 |
+| `CLAUDE_IRIS_TIMEOUT` | `0.8` | Stop hook POST 超时秒数。压紧是为了避免服务慢/死时给终端响应增加延迟。 |
+| `CLAUDE_IRIS_SKIP_POSTINSTALL` | *(未设置)* | 设为 `1` 后 `npm i -g claude-iris` 不跑 post-install（用于 CI / Dockerfile），事后再手动 `claude-iris setup`。 |
 
 ---
 

@@ -59,6 +59,16 @@ You'll need: macOS or Linux (or [WSL2 on Windows](#windows-via-wsl2)),
 Python 3.10+, Node 18+, and Claude Code. The installer pre-flights all of
 these and prints copy-paste apt / brew commands if any are missing.
 
+**Upgrading later:**
+
+```bash
+npm i -g claude-iris@latest
+```
+
+Re-runs the post-install with the new version, refreshes the venv (any
+new requirements get installed), and updates the slash commands so the
+latest behavior of `/iris` and `/tutor` lands without any other action.
+
 ### <a id="windows-via-wsl2"></a> Windows — via WSL2
 
 Native Windows isn't supported. The keystroke-injection layer needs PyObjC
@@ -358,6 +368,11 @@ token as a 280×220 thumbnail. Old uploads are auto-pruned (default 7 days).
 | `CLAUDE_IRIS_POLL_INTERVAL` | `2` | Transcript fallback poll interval (seconds). `0` disables polling and relies on the Stop hook only. |
 | `CLAUDE_IRIS_POLL_WINDOW` | `600` | Polling only considers transcripts modified in the last N seconds. |
 | `CLAUDE_IRIS_CLEANUP_INTERVAL` | `21600` | Background TTL sweep period (seconds, default 6h). |
+| `CLAUDE_IRIS_TRANSCRIPT_CACHE_MAX` | `32` | LRU cap on parsed-transcript cache entries. Each entry is the parsed turn list of one session; bumping this trades RAM for fewer re-walks of long jsonls. |
+| `CLAUDE_IRIS_READ_ONLY` | *(unset)* | Set to `1` to force read-only mode on any platform (hides the input bar, no listener, /input returns 409). WSL is auto-detected — you only need this for testing the read-only UI on macOS/Linux. |
+| `CLAUDE_IRIS_ENDPOINT` | `http://127.0.0.1:7456/push` | Where the Stop hook POSTs assistant turns. Override only if you ran the server under a non-default `CLAUDE_IRIS_HOST` / `CLAUDE_IRIS_PORT`. |
+| `CLAUDE_IRIS_TIMEOUT` | `0.8` | Stop-hook POST timeout in seconds. Stays tight so a slow / dead server can't add latency between Claude turns. |
+| `CLAUDE_IRIS_SKIP_POSTINSTALL` | *(unset)* | Set to `1` before `npm i -g claude-iris` to skip the auto-setup (CI, Dockerfiles). Run `claude-iris setup` manually afterwards. |
 
 ---
 

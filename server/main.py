@@ -72,16 +72,21 @@ def _cleanup_sessions(ttl_days: float) -> None:
     the sidebar fills with months-old sessions the user no longer cares
     about. Backfill from transcripts means a stale session can always be
     rebuilt if needed — the file isn't load-bearing.
+
+    Tombstone (`.deleted`) files for hard-deleted sessions are also pruned
+    here under the same TTL — without that, every session the user ever
+    deleted leaves a zero-byte marker in the dir forever.
     """
     if ttl_days <= 0:
         return
     cutoff = time.time() - ttl_days * 86400
-    for p in SESSION_DIR.glob("*.jsonl"):
-        try:
-            if p.is_file() and p.stat().st_mtime < cutoff:
-                p.unlink()
-        except OSError:
-            pass
+    for pattern in ("*.jsonl", "*.deleted"):
+        for p in SESSION_DIR.glob(pattern):
+            try:
+                if p.is_file() and p.stat().st_mtime < cutoff:
+                    p.unlink()
+            except OSError:
+                pass
 
 
 _cleanup_sessions(SESSION_TTL_DAYS)
@@ -507,7 +512,10 @@ def _extract_assistant_text(rec: dict) -> str:
 # Cached single-pass transcript walk: (mtime, size) → {"title": ..., "turns": [...]}.
 # Avoids re-reading the whole jsonl on every GET /session/{id} for sessions
 # with hundreds of turns, and replaces the previous pair of separate walks.
+# Each entry can be MB-sized for long sessions, so we cap at MAX_CACHE
+# entries with a simple LRU eviction (insertion order).
 _TRANSCRIPT_CACHE: dict[str, tuple[float, int, dict[str, Any]]] = {}
+_TRANSCRIPT_CACHE_MAX = int(os.environ.get("CLAUDE_IRIS_TRANSCRIPT_CACHE_MAX", "32"))
 
 
 def _read_transcript(transcript: Path) -> dict[str, Any]:
@@ -582,7 +590,16 @@ def _read_transcript(transcript: Path) -> dict[str, Any]:
         return empty
 
     result = {"title": title, "turns": turns}
+    # Insertion-order LRU: evict the oldest when over cap. dict preserves
+    # insertion order in Python 3.7+, so popping the first key gives us
+    # the least-recently-inserted entry. Updating an existing entry by
+    # `del` then re-`set` would also refresh recency but `_read_transcript`
+    # is read-mostly per session, so we don't bother.
+    if key in _TRANSCRIPT_CACHE:
+        del _TRANSCRIPT_CACHE[key]
     _TRANSCRIPT_CACHE[key] = (stat.st_mtime, stat.st_size, result)
+    while len(_TRANSCRIPT_CACHE) > _TRANSCRIPT_CACHE_MAX:
+        _TRANSCRIPT_CACHE.pop(next(iter(_TRANSCRIPT_CACHE)))
     return result
 
 

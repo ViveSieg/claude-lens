@@ -154,9 +154,15 @@ ln -s "${REPO}" "${PLUGIN_LINK}"
 echo ">>> plugin symlinked: ${PLUGIN_LINK}"
 
 # 4. install slash commands
-cp "${REPO}/commands/iris.md" "${COMMANDS_DIR}/iris.md"
-cp "${REPO}/commands/tutor.md" "${COMMANDS_DIR}/tutor.md"
-echo ">>> /iris and /tutor commands installed at ${COMMANDS_DIR}/"
+# Symlink (not cp) so a future package upgrade auto-publishes any spec
+# changes to the live slash commands. Any leftover plain file from older
+# installers gets replaced. The -n on ln prevents creating links inside
+# an existing target if the path resolves to a directory mid-race.
+for cmd in iris tutor; do
+  rm -f "${COMMANDS_DIR}/${cmd}.md"
+  ln -snf "${REPO}/commands/${cmd}.md" "${COMMANDS_DIR}/${cmd}.md"
+done
+echo ">>> /iris and /tutor commands linked to ${COMMANDS_DIR}/"
 
 # 5. make scripts executable
 chmod +x "${REPO}/hooks/stop_iris.py"

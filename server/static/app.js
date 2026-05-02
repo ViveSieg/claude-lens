@@ -353,6 +353,7 @@ async function loadHistory(opts = {}) {
     if (visible.length === 0) {
       showEmpty();
       els.feedMeta.textContent = "— no messages yet —";
+      rebuildToc();  // empty cache → empties the "On this page" list too
       return;
     }
     for (const msg of visible) appendMessage(msg, false);
