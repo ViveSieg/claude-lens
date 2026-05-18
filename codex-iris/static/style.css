@@ -1,0 +1,260 @@
+:root {
+  --bg: #f5f7f8;
+  --panel: #ffffff;
+  --ink: #182024;
+  --muted: #64717a;
+  --line: #d9e0e4;
+  --accent: #0f766e;
+  --accent-2: #b45309;
+  --tool: #334155;
+  --assistant: #0b5d55;
+  --user: #7c2d12;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+}
+
+button,
+input {
+  font: inherit;
+}
+
+button {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--ink);
+  min-height: 34px;
+  padding: 0 12px;
+  cursor: pointer;
+}
+
+button:hover {
+  border-color: var(--accent);
+}
+
+.shell {
+  display: grid;
+  grid-template-columns: 340px minmax(0, 1fr);
+  height: 100vh;
+}
+
+.sidebar {
+  border-right: 1px solid var(--line);
+  background: #edf2f3;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.brand {
+  min-height: 82px;
+  padding: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.brand h1,
+.topbar h2 {
+  margin: 0;
+  letter-spacing: 0;
+}
+
+.brand h1 {
+  font-size: 22px;
+}
+
+.brand p,
+.title-block p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.icon-button {
+  width: 34px;
+  padding: 0;
+  font-weight: 700;
+}
+
+.session-list {
+  overflow: auto;
+  padding: 10px;
+}
+
+.session-item {
+  width: 100%;
+  text-align: left;
+  min-height: 72px;
+  height: auto;
+  padding: 10px;
+  border-radius: 8px;
+  margin-bottom: 8px;
+  background: transparent;
+  display: block;
+}
+
+.session-item.active {
+  background: var(--panel);
+  border-color: var(--accent);
+}
+
+.session-label {
+  font-weight: 650;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.session-sub {
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 6px;
+}
+
+.main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.topbar {
+  min-height: 82px;
+  padding: 14px 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.title-block {
+  min-width: 0;
+}
+
+.title-block h2 {
+  font-size: 20px;
+  overflow-wrap: anywhere;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 13px;
+  min-height: 34px;
+}
+
+.messages {
+  overflow: auto;
+  padding: 18px;
+}
+
+.message {
+  border: 1px solid var(--line);
+  background: var(--panel);
+  border-radius: 8px;
+  margin: 0 auto 12px;
+  max-width: 980px;
+}
+
+.message-header {
+  min-height: 36px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.role {
+  font-size: 12px;
+  font-weight: 750;
+  text-transform: uppercase;
+  letter-spacing: 0;
+}
+
+.role.user {
+  color: var(--user);
+}
+
+.role.assistant {
+  color: var(--assistant);
+}
+
+.role.tool,
+.role.stats {
+  color: var(--tool);
+}
+
+.stamp {
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.content {
+  margin: 0;
+  padding: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.content.dialogue {
+  font-family: inherit;
+  font-size: 15px;
+}
+
+.empty {
+  color: var(--muted);
+  text-align: center;
+  padding: 48px 16px;
+}
+
+@media (max-width: 860px) {
+  .shell {
+    grid-template-columns: 1fr;
+    height: auto;
+    min-height: 100vh;
+  }
+
+  .sidebar {
+    max-height: 38vh;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .topbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .toolbar {
+    justify-content: flex-start;
+  }
+}

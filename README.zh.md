@@ -92,6 +92,32 @@ post-install 脚本会预检 `python3 / venv / node / npm`，缺一不可——�
 
 > **小贴士**：项目代码放在 WSL 内的 `~/projects/...` 而**不要**放 `/mnt/c/...` 下。WSL 跨边界访问 Windows 文件系统慢约 10×，转录轮询会有明显延迟。
 
+### 原生 Windows Codex Desktop 版本
+
+本分支另外包含一个实验性的 Codex Desktop 适配版本，位于
+[`codex-iris/`](codex-iris/)。它不走 Claude Code hook 链路，而是直接读取本机
+Codex session JSONL，在 `http://127.0.0.1:7456` 提供只读浏览器镜像，并提供
+Windows PowerShell 版 NotebookLM tutor 包装脚本。
+
+启动浏览器镜像：
+
+```powershell
+.\codex-iris\start.ps1
+```
+
+NotebookLM tutor 推荐使用真实 Chrome CDP 模式：
+
+```powershell
+$env:CODEX_TUTOR_CHROME_PORT="9555"
+$env:CODEX_TUTOR_TRANSPORT="cdp"
+.\codex-iris\tutor.ps1 detail
+.\codex-iris\tutor.ps1 ask "你的问题"
+```
+
+完整安装、排障和本次 Windows 调试记录见
+[`codex-iris/README.zh.md`](codex-iris/README.zh.md) 与
+[`codex-iris/DEBUG_NOTES.md`](codex-iris/DEBUG_NOTES.md)。
+
 **安装过程说明：** post-install 脚本会在 npm 包目录内创建一个**独立的 Python 虚拟环境**，并将 `server/requirements.txt` 中声明的依赖安装至该虚拟环境（包括 FastAPI、uvicorn，以及 macOS 平台所需的 PyObjC `Quartz` 与 `Cocoa` 用于背景粘贴）。**全程不修改用户的全局 Python 环境**。安装完成时，macOS 平台应输出 `>>> macOS background-paste ready (PyObjC Quartz + AppKit)`；若提示 `PyObjC import failed`，输出中将包含手动重装命令。
 
 > **macOS 首次安装必读 —— "浏览器输入回写终端" 功能依赖系统权限**
