@@ -119,6 +119,33 @@ exactly like on macOS — minus the input bar.
 on `/mnt/c/...`. WSL → Windows filesystem crossing is ~10× slower, and
 Claude Code's transcript poller will feel the lag.
 
+### Native Windows Codex Desktop port
+
+This branch also includes an experimental Codex Desktop adaptation under
+[`codex-iris/`](codex-iris/). It is separate from the Claude Code hook path
+above: it reads local Codex session JSONL files, serves a read-only browser
+mirror on `http://127.0.0.1:7456`, and includes a PowerShell NotebookLM tutor
+wrapper for Windows.
+
+Start with:
+
+```powershell
+.\codex-iris\start.ps1
+```
+
+For NotebookLM tutor mode, use real Chrome CDP mode:
+
+```powershell
+$env:CODEX_TUTOR_CHROME_PORT="9555"
+$env:CODEX_TUTOR_TRANSPORT="cdp"
+.\codex-iris\tutor.ps1 detail
+.\codex-iris\tutor.ps1 ask "your question"
+```
+
+See [`codex-iris/README.md`](codex-iris/README.md) and
+[`codex-iris/DEBUG_NOTES.md`](codex-iris/DEBUG_NOTES.md) for setup,
+troubleshooting, and the Windows-specific debugging notes.
+
 **What happens during install:** post-install creates a sandboxed Python venv
 inside the package directory and installs everything from `server/requirements.txt`
 into it (FastAPI/uvicorn, plus PyObjC `Quartz` + `Cocoa` on macOS for

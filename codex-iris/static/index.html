@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Codex Iris</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div>
+            <h1>Codex Iris</h1>
+            <p id="health">Connecting</p>
+          </div>
+          <button id="refreshSessions" class="icon-button" title="Refresh sessions">R</button>
+        </div>
+        <div id="sessions" class="session-list"></div>
+      </aside>
+
+      <main class="main">
+        <header class="topbar">
+          <div class="title-block">
+            <h2 id="sessionTitle">No session selected</h2>
+            <p id="sessionMeta"></p>
+          </div>
+          <div class="toolbar">
+            <label class="toggle"><input type="checkbox" id="showTools" checked /> Tools</label>
+            <label class="toggle"><input type="checkbox" id="autoRefresh" checked /> Live</label>
+            <button id="latestButton">Latest</button>
+            <button id="refreshButton">Refresh</button>
+          </div>
+        </header>
+        <section id="messages" class="messages"></section>
+      </main>
+    </div>
+    <script src="/app.js"></script>
+  </body>
+</html>
