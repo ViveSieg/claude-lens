@@ -68,6 +68,20 @@ function renderMarkdown(container, src) {
     return `<div class="mermaid-slot" data-mid="${id}"></div>`;
   });
 
+  // Pre-extract math blocks so marked doesn't mangle LaTeX (underscores,
+  // backslashes, braces etc.). Same strategy as mermaid above.
+  const mathBlocks = [];
+  protectedSrc = protectedSrc.replace(/\$\$([\s\S]*?)\$\$/g, (_, latex) => {
+    const id = mathBlocks.length;
+    mathBlocks.push({ type: 'display', latex: latex.trim() });
+    return `<div class="math-slot" data-mid="${id}"></div>`;
+  });
+  protectedSrc = protectedSrc.replace(/(?<!\$)\$([^\$\n]+?)\$(?!\$)/g, (_, latex) => {
+    const id = mathBlocks.length;
+    mathBlocks.push({ type: 'inline', latex: latex.trim() });
+    return `<span class="math-slot" data-mid="${id}"></span>`;
+  });
+
   // Replace [image: /abs/path/.../<name>] tokens with a clickable
   // thumbnail. Stored content keeps the full path so the listener still
   // types it into the terminal — this is display-only.
@@ -94,6 +108,18 @@ function renderMarkdown(container, src) {
   container.innerHTML = (window.DOMPurify
     ? DOMPurify.sanitize(html, { ADD_ATTR: ["target", "rel"] })
     : html);
+
+  // Restore math blocks so KaTeX can render them
+  if (mathBlocks.length) {
+    container.querySelectorAll('.math-slot').forEach(slot => {
+      const id = parseInt(slot.dataset.mid, 10);
+      const block = mathBlocks[id];
+      if (!block) return;
+      slot.outerHTML = block.type === 'display'
+        ? `$$${block.latex}$$`
+        : `$${block.latex}$`;
+    });
+  }
 
   // KaTeX
   if (window.renderMathInElement) {
