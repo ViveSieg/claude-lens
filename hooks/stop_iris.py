@@ -83,15 +83,18 @@ def latest_turn_assistant_text(transcript: Path) -> str | None:
     return "\n\n".join(current_turn).strip() or None
 
 
-def last_custom_title(transcript: Path) -> str | None:
-    """Return the most recent /rename title for this session, if any.
+def last_title_from_transcript(transcript: Path) -> str | None:
+    """Return the most recent conversation title from the transcript.
 
-    Claude Code writes one record per /rename:
-        {"type": "custom-title", "customTitle": "<name>", "sessionId": "..."}
+    Priority: /rename > ai-title.
+    Claude Code writes:
+      - /rename: {"type": "custom-title", "customTitle": "<name>", "sessionId": "..."}
+      - auto:    {"type": "ai-title", "aiTitle": "<name>", "sessionId": "..."}
     """
     if not transcript.exists():
         return None
-    last_title: str | None = None
+    rename: str | None = None
+    ai_title: str | None = None
     with transcript.open(encoding="utf-8") as f:
         for line in f:
             line = line.strip()
@@ -101,16 +104,21 @@ def last_custom_title(transcript: Path) -> str | None:
                 rec = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            if rec.get("type") == "custom-title":
-                t = rec.get("customTitle")
-                if t:
-                    last_title = t
-    return last_title
+            t = rec.get("type")
+            if t == "custom-title":
+                v = rec.get("customTitle")
+                if v:
+                    rename = v
+            elif t == "ai-title":
+                v = rec.get("aiTitle")
+                if v:
+                    ai_title = v
+    return rename or ai_title
 
 
 def derive_session_label(transcript: Path | None, cwd: str | None) -> str | None:
     if transcript is not None:
-        title = last_custom_title(transcript)
+        title = last_title_from_transcript(transcript)
         if title:
             return title
     if not cwd:

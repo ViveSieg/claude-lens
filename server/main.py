@@ -570,6 +570,11 @@ def _read_transcript(transcript: Path) -> dict[str, Any]:
                     if t:
                         title = t
                     continue
+                if rec_type == "ai-title":
+                    t = rec.get("aiTitle")
+                    if t and title is None:
+                        title = t
+                    continue
                 role = rec_type or rec.get("role")
                 ts = _parse_iso_ts(rec.get("timestamp"))
                 if role == "user":
